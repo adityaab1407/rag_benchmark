@@ -1,0 +1,947 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "created": "2026-03-12",
+    "corpus": ["huggingface_docs", "langchain_docs", "anthropic_docs", "research_papers", "beir_scifact"],
+    "total_questions": 30,
+    "tiers": {
+      "tier_1": {"count": 10, "description": "Single chunk — tests basic retrieval precision"},
+      "tier_2": {"count": 10, "description": "Multi-chunk — tests retrieval completeness"},
+      "tier_3": {"count": 10, "description": "Adversarial — tests abstention and hallucination resistance"}
+    }
+  },
+  "questions": [
+    {
+      "id": "q001",
+      "question": "What are the default LoRA parameters used in the HuggingFace PEFT integration example for causal language modeling, and what do they control?",
+      "tier": 1,
+      "category": "finetuning",
+      "source_documents": ["peft.md"],
+      "ground_truth_answer": "In the HuggingFace PEFT integration example for causal language modeling, the default LoRA parameters are r=8 (dimension of the smaller low-rank matrices), lora_alpha=32 (scaling factor that controls how much the adapter weights influence the model), and lora_dropout=0.1 (dropout rate applied to LoRA layers to prevent overfitting). The task_type is set to TaskType.CAUSAL_LM and inference_mode is set to False for training.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "peft.md",
+          "approximate_location": "LoRA configuration section with code example",
+          "key_passage": "lora_config = LoraConfig(\n    task_type=TaskType.CAUSAL_LM, # type of task to train on\n    inference_mode=False, # set to False for training\n    r=8, # dimension of the smaller matrices\n    lora_alpha=32, # scaling factor\n    lora_dropout=0.1 # dropout of LoRA layers\n)",
+          "why_this_chunk": "This chunk contains the exact LoRA configuration parameters with inline comments explaining what each controls"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["LoraConfig", "r=8", "lora_alpha", "lora_dropout"],
+        "must_not_hallucinate": ["specific learning rate values for LoRA training", "exact memory savings from LoRA", "specific model size requirements"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Answer must cite the exact parameter values r=8, lora_alpha=32, lora_dropout=0.1 from the documentation",
+        "completeness_check": "Must explain what each parameter controls: rank dimension, scaling factor, dropout rate",
+        "hallucination_traps": "A bad RAG system might fabricate other LoRA parameters like learning_rate or target_modules that are not in this specific example"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.85,
+      "retrieval_keywords": ["LoRA", "PEFT", "LoraConfig", "lora_alpha", "lora_dropout", "r=8", "parameter-efficient fine-tuning", "causal language modeling"],
+      "notes": "Tests retrieval of specific configuration code from HuggingFace PEFT documentation"
+    },
+    {
+      "id": "q002",
+      "question": "How does QLoRA combine quantization with LoRA for fine-tuning large language models according to the bitsandbytes documentation?",
+      "tier": 1,
+      "category": "finetuning",
+      "source_documents": ["quantization/bitsandbytes.md"],
+      "ground_truth_answer": "QLoRA is a 4-bit quantization technique provided by the bitsandbytes library that compresses models even further than 8-bit quantization while maintaining trainability by inserting a small set of trainable low-rank adaptation (LoRA) weights. It combines 4-bit NF4 quantization of model weights with LoRA adapters, enabling fine-tuning of very large models on limited GPU memory.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "quantization/bitsandbytes.md",
+          "approximate_location": "Introduction section describing bitsandbytes quantization features",
+          "key_passage": "QLoRA - A 4-bit quantization technique that compresses models even further while maintaining trainability by inserting a small set of trainable low-rank adaptation (LoRA) weights.",
+          "why_this_chunk": "This is the core definition of QLoRA from the bitsandbytes documentation"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["QLoRA", "4-bit", "bitsandbytes", "LoRA", "quantization"],
+        "must_not_hallucinate": ["specific GPU memory savings numbers", "exact training speedup percentages", "specific model benchmarks with QLoRA"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Answer must describe QLoRA as 4-bit quantization combined with LoRA weights, as stated in documentation",
+        "completeness_check": "Must mention both the compression (4-bit quantization) and trainability (LoRA weights) aspects",
+        "hallucination_traps": "A bad RAG system might invent specific memory reduction numbers or claim QLoRA works with specific model families only"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.80,
+      "retrieval_keywords": ["QLoRA", "4-bit quantization", "bitsandbytes", "LoRA", "NF4", "BitsAndBytesConfig", "load_in_4bit"],
+      "notes": "Tests retrieval of quantization concepts from HuggingFace bitsandbytes documentation"
+    },
+    {
+      "id": "q003",
+      "question": "What are the two RAG formulations introduced in the original RAG paper, and how do they differ in their treatment of retrieved documents?",
+      "tier": 1,
+      "category": "rag_concepts",
+      "source_documents": ["rag_paper.pdf"],
+      "ground_truth_answer": "The original RAG paper introduces two formulations: RAG-Sequence and RAG-Token. RAG-Sequence uses the same retrieved document to generate the complete output sequence, treating the retrieved document as a single latent variable that is marginalized to get the seq2seq probability. RAG-Token can predict each target token based on a different document, allowing different retrieved passages to influence different parts of the generation.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "rag_paper.pdf",
+          "approximate_location": "Section 2.1 Models",
+          "key_passage": "We propose two models that marginalize over the latent documents in different ways to produce a distribution over generated text. In one approach, RAG-Sequence, the model uses the same document to predict each target token. The second approach, RAG-Token, can predict each target token based on a different document.",
+          "why_this_chunk": "This passage directly defines the two RAG formulations and their key difference"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["RAG-Sequence", "RAG-Token", "marginalize", "latent variable"],
+        "must_not_hallucinate": ["specific BLEU scores comparing the two formulations", "exact number of retrieved documents used", "training dataset sizes"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must accurately describe RAG-Sequence as using one document for full sequence and RAG-Token as using different documents per token",
+        "completeness_check": "Must mention both formulations and their treatment of retrieved documents as latent variables",
+        "hallucination_traps": "A bad RAG system might confuse RAG-Sequence/Token with other RAG variants not in the paper, or invent performance numbers"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.85,
+      "retrieval_keywords": ["RAG-Sequence", "RAG-Token", "retrieval-augmented generation", "latent variable", "marginalize", "seq2seq", "non-parametric memory"],
+      "notes": "Tests retrieval of core concepts from the foundational RAG paper (arxiv 2005.11401)"
+    },
+    {
+      "id": "q004",
+      "question": "How does HyDE (Hypothetical Document Embeddings) perform zero-shot dense retrieval without relevance labels?",
+      "tier": 1,
+      "category": "rag_concepts",
+      "source_documents": ["hyde_paper.pdf"],
+      "ground_truth_answer": "HyDE decomposes dense retrieval into two tasks. First, given a query, it uses an instruction-following language model (e.g., InstructGPT) to generate a hypothetical document that captures relevance patterns but may contain false details. Then, an unsupervised contrastively learned encoder (e.g., Contriever) encodes this hypothetical document into an embedding vector, which is used to retrieve similar real documents from the corpus based on vector similarity. The encoder's dense bottleneck filters out incorrect details from the generated document.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "hyde_paper.pdf",
+          "approximate_location": "Abstract",
+          "key_passage": "Given a query, HyDE first zero-shot instructs an instruction-following language model (e.g. InstructGPT) to generate a hypothetical document. The document captures relevance patterns but is unreal and may contain false details. Then, an unsupervised contrastively learned encoder (e.g. Contriever) encodes the document into an embedding vector. This vector identifies a neighborhood in the corpus embedding space, where similar real documents are retrieved based on vector similarity. This second step ground the generated document to the actual corpus, with the encoder's dense bottleneck filtering out the incorrect details.",
+          "why_this_chunk": "This is the complete description of the HyDE approach from the abstract"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["HyDE", "hypothetical document", "InstructGPT", "Contriever", "zero-shot", "dense retrieval"],
+        "must_not_hallucinate": ["specific retrieval accuracy numbers", "exact model parameter counts", "training procedures for HyDE"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must describe the two-step process: generate hypothetical document, then encode and retrieve real documents",
+        "completeness_check": "Must mention both the generation step (InstructGPT) and the encoding step (Contriever) and the filtering role of the encoder",
+        "hallucination_traps": "A bad RAG system might claim HyDE requires fine-tuning or relevance labels, contradicting its zero-shot nature"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.85,
+      "retrieval_keywords": ["HyDE", "Hypothetical Document Embeddings", "zero-shot", "dense retrieval", "InstructGPT", "Contriever", "hypothetical document"],
+      "notes": "Tests retrieval of the core HyDE methodology from arxiv 2212.10496"
+    },
+    {
+      "id": "q005",
+      "question": "In LangChain, what is the difference between an Agent and a Chain in terms of how actions are determined?",
+      "tier": 1,
+      "category": "langchain_agents",
+      "source_documents": ["langchain/libs/langchain/langchain_classic/agents/__init__.py"],
+      "ground_truth_answer": "In LangChain, the key difference is that in Chains, a sequence of actions is hardcoded and predetermined. In Agents, a language model is used as a reasoning engine to determine which actions to take and in which order. Agents select and use Tools and Toolkits for actions, making them more flexible and adaptive compared to the fixed execution paths of Chains.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "langchain/libs/langchain/langchain_classic/agents/__init__.py",
+          "approximate_location": "Module docstring at top of file",
+          "key_passage": "Agent is a class that uses an LLM to choose a sequence of actions to take. In Chains, a sequence of actions is hardcoded. In Agents, a language model is used as a reasoning engine to determine which actions to take and in which order. Agents select and use Tools and Toolkits for actions.",
+          "why_this_chunk": "This is the definitive docstring explaining the Agent vs Chain distinction in LangChain"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["Agent", "Chain", "LLM", "reasoning engine", "Tools"],
+        "must_not_hallucinate": ["specific agent types or their performance characteristics", "exact API method signatures", "benchmark results"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must state that Chains have hardcoded action sequences while Agents use an LLM as a reasoning engine",
+        "completeness_check": "Must mention both the hardcoded nature of Chains and the LLM-driven nature of Agents, plus the role of Tools",
+        "hallucination_traps": "A bad RAG system might invent specific Chain or Agent types not mentioned in this passage, or describe non-existent API methods"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.85,
+      "retrieval_keywords": ["Agent", "Chain", "LangChain", "reasoning engine", "Tools", "Toolkits", "LLM", "hardcoded"],
+      "notes": "Tests retrieval of core LangChain architectural concepts from the agents module docstring"
+    },
+    {
+      "id": "q006",
+      "question": "How does the MultiQueryRetriever in LangChain work to improve document retrieval?",
+      "tier": 1,
+      "category": "langchain_agents",
+      "source_documents": ["langchain/libs/langchain/langchain_classic/retrievers/multi_query.py"],
+      "ground_truth_answer": "The MultiQueryRetriever uses an LLM to generate 3 different versions of a given user question to retrieve relevant documents from a vector database. By generating multiple perspectives on the user question, it helps overcome some of the limitations of distance-based similarity search. It retrieves documents for each generated query and returns the unique union of all retrieved documents, deduplicating results.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "langchain/libs/langchain/langchain_classic/retrievers/multi_query.py",
+          "approximate_location": "DEFAULT_QUERY_PROMPT and class docstring",
+          "key_passage": "You are an AI language model assistant. Your task is to generate 3 different versions of the given user question to retrieve relevant documents from a vector database. By generating multiple perspectives on the user question, your goal is to help the user overcome some of the limitations of distance-based similarity search.",
+          "why_this_chunk": "This is the default prompt template that defines the core behavior of MultiQueryRetriever"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["MultiQueryRetriever", "3 different versions", "vector database", "distance-based similarity search"],
+        "must_not_hallucinate": ["specific embedding model names used", "exact retrieval accuracy improvements", "specific chunk size parameters"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must describe the process of generating multiple query versions and retrieving the unique union of documents",
+        "completeness_check": "Must mention the LLM-based query generation, the goal of overcoming similarity search limitations, and the unique union of results",
+        "hallucination_traps": "A bad RAG system might invent specific numbers of queries generated beyond 3, or claim specific accuracy improvements"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.80,
+      "retrieval_keywords": ["MultiQueryRetriever", "multi query", "LangChain", "retriever", "vector database", "similarity search", "query generation"],
+      "notes": "Tests retrieval of LangChain retriever implementation details from source code"
+    },
+    {
+      "id": "q007",
+      "question": "What is the Pipeline API in HuggingFace Transformers and what tasks does it support?",
+      "tier": 1,
+      "category": "huggingface_transformers",
+      "source_documents": ["pipeline_tutorial.md"],
+      "ground_truth_answer": "The Pipeline is a simple but powerful inference API in HuggingFace Transformers that is readily available for a variety of machine learning tasks with any model from the Hugging Face Hub. It supports GPUs, Apple Silicon, and half-precision weights to accelerate inference and save memory. Example tasks include text generation (TextGenerationPipeline), automatic speech recognition, image classification, and visual question answering. Each task is configured with a default pretrained model and preprocessor, which can be overridden.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "pipeline_tutorial.md",
+          "approximate_location": "Introduction section",
+          "key_passage": "The Pipeline is a simple but powerful inference API that is readily available for a variety of machine learning tasks with any model from the Hugging Face Hub. Tailor the Pipeline to your task with task specific parameters such as adding timestamps to an automatic speech recognition (ASR) pipeline for transcribing meeting notes. Pipeline supports GPUs, Apple Silicon, and half-precision weights to accelerate inference and save memory.",
+          "why_this_chunk": "This passage defines what Pipeline is and its key features"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["Pipeline", "inference API", "Hugging Face Hub", "text-generation", "automatic-speech-recognition"],
+        "must_not_hallucinate": ["specific model performance benchmarks", "exact memory usage numbers", "Pipeline internal implementation details"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must describe Pipeline as an inference API for multiple ML tasks from the HuggingFace Hub",
+        "completeness_check": "Must mention multiple supported tasks and hardware acceleration support",
+        "hallucination_traps": "A bad RAG system might list tasks not demonstrated in the documentation or claim specific latency numbers"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.85,
+      "retrieval_keywords": ["Pipeline", "inference API", "HuggingFace", "Transformers", "text-generation", "image-classification", "automatic-speech-recognition"],
+      "notes": "Tests retrieval of core HuggingFace Pipeline documentation"
+    },
+    {
+      "id": "q008",
+      "question": "What are the three subword tokenization algorithms supported by HuggingFace Transformers, and which models use each?",
+      "tier": 1,
+      "category": "huggingface_transformers",
+      "source_documents": ["tokenizer_summary.md"],
+      "ground_truth_answer": "HuggingFace Transformers supports three subword tokenization algorithms: Byte Pair Encoding (BPE), Unigram, and WordPiece. BPE is the most popular and is used by models like Llama, Gemma, and Qwen2. Unigram is the second most popular and is used by models like T5, BigBird, and Pegasus. WordPiece is the tokenization algorithm for BERT-family models like DistilBERT and Electra. All three split text into units between words and characters, keeping the vocabulary compact while still capturing meaningful pieces.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "tokenizer_summary.md",
+          "approximate_location": "Introduction and algorithm sections",
+          "key_passage": "Transformers support three subword tokenization algorithms: Byte pair encoding (BPE), Unigram, and WordPiece. They split text into units between words and characters, keeping the vocabulary compact while still capturing meaningful pieces.",
+          "why_this_chunk": "This is the introductory statement listing all three supported tokenization algorithms"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["BPE", "Unigram", "WordPiece", "subword", "tokenization"],
+        "must_not_hallucinate": ["specific vocabulary sizes for named models", "tokenization speed benchmarks", "exact token counts for example texts"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must correctly list BPE, Unigram, and WordPiece and associate them with the correct model families",
+        "completeness_check": "Must mention all three algorithms and at least one model example for each",
+        "hallucination_traps": "A bad RAG system might assign wrong tokenization algorithms to models or invent a fourth algorithm"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.85,
+      "retrieval_keywords": ["tokenization", "BPE", "Unigram", "WordPiece", "Llama", "T5", "BERT", "subword", "SentencePiece"],
+      "notes": "Tests retrieval of tokenization algorithm overview from HuggingFace docs"
+    },
+    {
+      "id": "q009",
+      "question": "What is the LangChain integration for Anthropic's Claude models, and how do you install it?",
+      "tier": 1,
+      "category": "anthropic_claude",
+      "source_documents": ["langchain/libs/partners/anthropic/README.md"],
+      "ground_truth_answer": "The LangChain integration for Anthropic's generative models is provided through the langchain-anthropic package. It can be installed with pip install langchain-anthropic. The package provides integration for Anthropic's models and is documented in the API reference at reference.langchain.com/python/integrations/langchain_anthropic/. LangChain's monorepo also lists Anthropic as one of its partner integrations alongside OpenAI, Ollama, and others.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "langchain/libs/partners/anthropic/README.md",
+          "approximate_location": "Package description and installation section",
+          "key_passage": "This package contains the LangChain integration for Anthropic's generative models.",
+          "why_this_chunk": "This is the definitive description of the langchain-anthropic package"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["langchain-anthropic", "Anthropic", "generative models", "pip install"],
+        "must_not_hallucinate": ["specific Claude model version numbers", "Anthropic API pricing", "specific model capabilities or context window sizes"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must describe langchain-anthropic as the integration package for Anthropic's generative models",
+        "completeness_check": "Must include the installation command and package purpose",
+        "hallucination_traps": "A bad RAG system might invent specific Claude model names or capabilities not mentioned in the docs"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.75,
+      "retrieval_keywords": ["langchain-anthropic", "Anthropic", "Claude", "LangChain", "integration", "partner", "generative models"],
+      "notes": "Tests retrieval of Anthropic/Claude content from LangChain partner integration docs since no dedicated Anthropic docs directory exists"
+    },
+    {
+      "id": "q010",
+      "question": "What is Scaled Dot-Product Attention as described in the 'Attention Is All You Need' paper, and why is the scaling factor used?",
+      "tier": 1,
+      "category": "attention_mechanism",
+      "source_documents": ["attention_paper.pdf"],
+      "ground_truth_answer": "Scaled Dot-Product Attention computes dot products of the query with all keys, divides each by the square root of dk (the dimension of keys), and applies a softmax function to obtain weights on the values. The formula is Attention(Q, K, V) = softmax(QK^T / sqrt(dk))V. The scaling factor 1/sqrt(dk) is used because for large values of dk, the dot products grow large in magnitude, pushing the softmax function into regions where it has extremely small gradients. The scaling counteracts this effect.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "attention_paper.pdf",
+          "approximate_location": "Section 3.2.1 Scaled Dot-Product Attention",
+          "key_passage": "We compute the dot products of the query with all keys, divide each by sqrt(dk), and apply a softmax function to obtain the weights on the values. Attention(Q, K, V) = softmax(QK^T / sqrt(dk))V. We suspect that for large values of dk, the dot products grow large in magnitude, pushing the softmax function into regions where it has extremely small gradients. To counteract this effect, we scale the dot products by 1/sqrt(dk).",
+          "why_this_chunk": "This describes the complete mechanism and motivation for scaled dot-product attention"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 1,
+        "must_contain_terms": ["Scaled Dot-Product Attention", "softmax", "sqrt(dk)", "query", "keys", "values"],
+        "must_not_hallucinate": ["specific BLEU score improvements from scaling", "exact computational complexity formulas", "implementation code details"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must include the attention formula and the scaling rationale about softmax gradient saturation",
+        "completeness_check": "Must describe the computation steps (dot product, scaling, softmax) and the motivation for scaling",
+        "hallucination_traps": "A bad RAG system might confuse this with multi-head attention details or invent specific numerical examples"
+      },
+      "is_answerable": true,
+      "difficulty": "easy",
+      "expected_confidence_min": 0.85,
+      "retrieval_keywords": ["Scaled Dot-Product Attention", "Attention Is All You Need", "Transformer", "softmax", "query", "keys", "values", "sqrt(dk)", "Vaswani"],
+      "notes": "Tests retrieval of the attention mechanism from the foundational Transformer paper (arxiv 1706.03762)"
+    },
+    {
+      "id": "q011",
+      "question": "What are the steps to fine-tune a causal language model using HuggingFace Trainer, from data preparation through training?",
+      "tier": 2,
+      "category": "procedural",
+      "source_documents": ["training.md", "peft.md"],
+      "ground_truth_answer": "To fine-tune a causal language model with HuggingFace Trainer: (1) Load and tokenize the dataset using AutoTokenizer with truncation=True and a max_length, removing original text columns after tokenization. Create a test split using train_test_split. (2) Set up a DataCollatorForLanguageModeling with mlm=False to dynamically pad batches. (3) Load the pretrained model with AutoModelForCausalLM.from_pretrained with dtype='auto'. (4) Configure TrainingArguments including num_train_epochs, per_device_train_batch_size, learning_rate, gradient_accumulation_steps, gradient_checkpointing, bf16, eval_strategy, and save_strategy. (5) Optionally add a LoRA adapter via PEFT by creating a LoraConfig and calling model.add_adapter(). (6) Create a Trainer instance with model, args, datasets, tokenizer, and data_collator, then call trainer.train() and trainer.push_to_hub().",
+      "ground_truth_chunks": [
+        {
+          "source_file": "training.md",
+          "approximate_location": "Tokenization section",
+          "key_passage": "The tokenizer creates the model inputs, input_ids and attention_mask. The model's forward method only accepts input_ids and attention_mask, so set remove_columns to drop columns like horoscope after tokenization.",
+          "why_this_chunk": "This explains the crucial tokenization step for preparing data for fine-tuning"
+        },
+        {
+          "source_file": "training.md",
+          "approximate_location": "Training section",
+          "key_passage": "Create a Trainer instance with all the necessary components, then call train to begin.",
+          "why_this_chunk": "This describes the final training step where Trainer is instantiated and training begins"
+        },
+        {
+          "source_file": "peft.md",
+          "approximate_location": "LoRA configuration section",
+          "key_passage": "Add LoraConfig to the model with add_adapter. The model is now ready to be passed to Trainer for training.",
+          "why_this_chunk": "This explains how to optionally add PEFT/LoRA adapters before training with Trainer"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["Trainer", "TrainingArguments", "AutoTokenizer", "AutoModelForCausalLM", "DataCollatorForLanguageModeling"],
+        "must_not_hallucinate": ["specific final loss values", "exact training durations", "specific hardware requirements"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "All steps must correspond to actual procedures described in the documentation",
+        "completeness_check": "Must cover data preparation (tokenization, collation), model loading, training configuration, and the training call",
+        "hallucination_traps": "A bad RAG system might invent additional required steps or specific hyperparameter values not in the docs"
+      },
+      "is_answerable": true,
+      "difficulty": "medium",
+      "expected_confidence_min": 0.65,
+      "retrieval_keywords": ["fine-tuning", "Trainer", "TrainingArguments", "tokenizer", "DataCollatorForLanguageModeling", "LoRA", "PEFT", "train", "push_to_hub"],
+      "notes": "Requires combining information from training.md and peft.md for a complete procedural answer"
+    },
+    {
+      "id": "q012",
+      "question": "Describe the complete procedure for building a ReAct agent in LangChain, including the required prompt structure and components.",
+      "tier": 2,
+      "category": "procedural",
+      "source_documents": ["langchain/libs/langchain/langchain_classic/agents/react/agent.py", "langchain/libs/langchain/langchain_classic/agents/__init__.py"],
+      "ground_truth_answer": "To build a ReAct agent in LangChain: (1) Use create_react_agent() which takes an LLM, a sequence of tools, and a prompt template. (2) The prompt must have three input keys: 'tools' (containing descriptions and arguments for each tool), 'tool_names' (containing all tool names), and 'agent_scratchpad' (containing previous agent actions and tool outputs as a string). (3) The agent is based on the paper 'ReAct: Synergizing Reasoning and Acting in Language Models'. (4) By default, it adds a stop token of 'Observation:' to avoid hallucinations. (5) Wrap the agent in an AgentExecutor, providing both the agent and tools. (6) Call agent_executor.invoke() with your input. The function returns a Runnable that takes the same input variables as the prompt and returns either an AgentAction or AgentFinish.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "langchain/libs/langchain/langchain_classic/agents/react/agent.py",
+          "approximate_location": "create_react_agent function docstring",
+          "key_passage": "Create an agent that uses ReAct prompting. Based on paper 'ReAct: Synergizing Reasoning and Acting in Language Models' (https://arxiv.org/abs/2210.03629). The prompt must have input keys: tools: contains descriptions and arguments for each tool. tool_names: contains all tool names. agent_scratchpad: contains previous agent actions and tool outputs as a string.",
+          "why_this_chunk": "This defines the required prompt structure and ReAct agent creation process"
+        },
+        {
+          "source_file": "langchain/libs/langchain/langchain_classic/agents/react/agent.py",
+          "approximate_location": "stop_sequence parameter documentation",
+          "key_passage": "If True, adds a stop token of 'Observation:' to avoid hallucinates. If False, does not add a stop token.",
+          "why_this_chunk": "This explains the stop token mechanism that prevents agent hallucination"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["create_react_agent", "ReAct", "AgentExecutor", "tools", "tool_names", "agent_scratchpad", "Observation"],
+        "must_not_hallucinate": ["specific tool implementations", "exact prompt templates not shown in the code", "performance benchmarks"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must accurately describe the three required prompt keys and the ReAct paper reference",
+        "completeness_check": "Must cover the creation function, prompt requirements, stop token, and AgentExecutor wrapping",
+        "hallucination_traps": "A bad RAG system might invent prompt templates or describe features from a different agent type"
+      },
+      "is_answerable": true,
+      "difficulty": "medium",
+      "expected_confidence_min": 0.65,
+      "retrieval_keywords": ["create_react_agent", "ReAct", "AgentExecutor", "LangChain", "agent", "prompt", "tools", "tool_names", "agent_scratchpad"],
+      "notes": "Requires combining agent creation and agent execution patterns from LangChain source code"
+    },
+    {
+      "id": "q013",
+      "question": "What are the key GPU training optimization techniques available in HuggingFace Transformers, and how does each affect training speed and memory?",
+      "tier": 2,
+      "category": "procedural",
+      "source_documents": ["perf_train_gpu_one.md", "training.md"],
+      "ground_truth_answer": "HuggingFace Transformers provides several GPU training optimization techniques configured through TrainingArguments: (1) Batch size: larger batch sizes lead to faster training by utilizing GPU parallel processing, recommended as powers of 2. (2) Gradient accumulation: overcomes memory constraints by accumulating gradients over multiple mini-batches, reducing memory but potentially slowing training. (3) Gradient checkpointing: reduces memory by recomputing intermediate activations during backward pass instead of storing them, with ~20% slower training. (4) Mixed precision: fp16 saves activations in half-precision for faster training; bf16 trades some precision for larger dynamic range; tf32 mode on Ampere GPUs can improve throughput by 16x. (5) Optimizers: various options like adamw_torch (default), adamw_apex_fused (fastest), and adamw_bnb_8bit for memory efficiency. (6) Data preloading: loads and prepares batches in advance to reduce GPU idling.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "perf_train_gpu_one.md",
+          "approximate_location": "Feature comparison table at the beginning",
+          "key_passage": "Feature | Training speed | Memory usage\nbatch size | yes | yes\ngradient accumulation | no | yes\ngradient checkpointing | no | yes\nmixed precision | yes | depends\noptimizers | yes | yes\ndata preloading | yes | no",
+          "why_this_chunk": "This table provides a comprehensive overview of how each technique affects speed and memory"
+        },
+        {
+          "source_file": "perf_train_gpu_one.md",
+          "approximate_location": "Gradient checkpointing section",
+          "key_passage": "Gradient checkpointing reduces memory usage by only storing some of the intermediate activations during the backward pass and recomputing the remaining activations. This avoids storing all of the intermediate activations from the forward pass, which can require a lot of memory overhead. However, it comes at the cost of slower training speed (~20%).",
+          "why_this_chunk": "This explains the specific trade-off of gradient checkpointing"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["gradient accumulation", "gradient checkpointing", "mixed precision", "bf16", "fp16", "TrainingArguments", "batch size"],
+        "must_not_hallucinate": ["specific memory reduction percentages for each technique", "exact training time comparisons", "specific model benchmark results"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Speed/memory impact descriptions must match the documentation's characterization",
+        "completeness_check": "Must cover at least batch size, gradient accumulation, gradient checkpointing, and mixed precision",
+        "hallucination_traps": "A bad RAG system might invent specific speedup numbers for each technique or describe techniques not in the docs"
+      },
+      "is_answerable": true,
+      "difficulty": "medium",
+      "expected_confidence_min": 0.65,
+      "retrieval_keywords": ["GPU", "training optimization", "gradient accumulation", "gradient checkpointing", "mixed precision", "bf16", "fp16", "batch size", "TrainingArguments"],
+      "notes": "Requires combining the feature overview table with detailed descriptions from perf_train_gpu_one.md"
+    },
+    {
+      "id": "q014",
+      "question": "Compare the LoRA approach from the LoRA paper with the PEFT adapter approach described in HuggingFace Transformers docs. What are the similarities and differences in implementation?",
+      "tier": 2,
+      "category": "comparison",
+      "source_documents": ["lora_paper.pdf", "peft.md"],
+      "ground_truth_answer": "The LoRA paper proposes freezing pre-trained model weights and injecting trainable rank decomposition matrices (B and A where W0 + delta_W = W0 + BA) into Transformer layers, reducing trainable parameters by up to 10,000 times and GPU memory by 3 times for GPT-3 175B. It studies adapting only attention weight matrices (Wq, Wk, Wv, Wo) and freezes MLP modules. The HuggingFace PEFT integration implements this through the LoraConfig class with parameters like r, lora_alpha, and lora_dropout, applied via model.add_adapter(). The HF implementation additionally supports targeting specific modules via target_modules parameter (e.g., q_proj, k_proj), training additional modules via modules_to_save (e.g., lm_head), and managing multiple adapters via set_adapter() and enable_adapters(). Both share the core concept of low-rank decomposition, but the HF integration provides a more user-friendly API with multi-adapter management capabilities.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "lora_paper.pdf",
+          "approximate_location": "Section 4.1 Low-Rank-Parametrized Update Matrices",
+          "key_passage": "For a pre-trained weight matrix W0, we constrain its update by representing the latter with a low-rank decomposition W0 + delta_W = W0 + BA, where B and A are low-rank matrices, and the rank r << min(d, k). During training, W0 is frozen and does not receive gradient updates, while A and B contain trainable parameters.",
+          "why_this_chunk": "This defines the core LoRA mathematical formulation from the paper"
+        },
+        {
+          "source_file": "peft.md",
+          "approximate_location": "LoRA configuration and adapter management sections",
+          "key_passage": "Low-Rank Adaptation (LoRA) is a very common PEFT method that decomposes the weight matrix into two smaller trainable matrices. Start by defining a LoraConfig object with the parameters shown below.",
+          "why_this_chunk": "This describes how the HuggingFace PEFT library implements LoRA"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["LoRA", "low-rank", "decomposition", "LoraConfig", "frozen", "trainable", "adapter"],
+        "must_not_hallucinate": ["specific benchmark comparisons between paper and HF implementation", "exact inference latency numbers", "memory usage comparisons on specific models"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must accurately represent both the paper's formulation and HF's API without mixing details",
+        "completeness_check": "Must cover mathematical formulation from paper and practical API from HuggingFace, noting both overlap and differences",
+        "hallucination_traps": "A bad RAG system might invent compatibility issues or performance differences between the paper's results and HF's implementation"
+      },
+      "is_answerable": true,
+      "difficulty": "hard",
+      "expected_confidence_min": 0.60,
+      "retrieval_keywords": ["LoRA", "low-rank adaptation", "PEFT", "LoraConfig", "frozen weights", "rank decomposition", "trainable parameters", "add_adapter"],
+      "notes": "Cross-document comparison between the LoRA paper and HuggingFace PEFT docs"
+    },
+    {
+      "id": "q015",
+      "question": "Compare how standard RAG and SELF-RAG differ in their approach to retrieval and generation. What specific mechanism does SELF-RAG introduce?",
+      "tier": 2,
+      "category": "comparison",
+      "source_documents": ["rag_paper.pdf", "selfrag_paper.pdf"],
+      "ground_truth_answer": "Standard RAG combines a pre-trained seq2seq model (parametric memory) with a dense vector index of Wikipedia (non-parametric memory) accessed via a pre-trained neural retriever, retrieving a fixed number of passages for every query and marginalizing over them. SELF-RAG introduces a framework where the LM adaptively retrieves passages on-demand and generates and reflects on retrieved passages and its own generations using special tokens called reflection tokens. Unlike standard RAG which indiscriminately retrieves a fixed number of passages regardless of necessity, SELF-RAG makes retrieval conditional and introduces self-reflection to assess the quality and relevance of retrieved content, making the LM controllable during inference to tailor behavior to diverse task requirements.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "rag_paper.pdf",
+          "approximate_location": "Abstract",
+          "key_passage": "We introduce RAG models where the parametric memory is a pre-trained seq2seq model and the non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural retriever.",
+          "why_this_chunk": "This defines the core architecture of standard RAG"
+        },
+        {
+          "source_file": "selfrag_paper.pdf",
+          "approximate_location": "Abstract",
+          "key_passage": "We introduce a new framework called Self-Reflective Retrieval-Augmented Generation (SELF-RAG) that enhances an LM's quality and factuality through retrieval and self-reflection. Our framework trains a single arbitrary LM that adaptively retrieves passages on-demand, and generates and reflects on retrieved passages and its own generations using special tokens, called reflection tokens.",
+          "why_this_chunk": "This defines the core SELF-RAG mechanism with reflection tokens"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["RAG", "SELF-RAG", "reflection tokens", "retrieval", "adaptive", "on-demand", "parametric", "non-parametric"],
+        "must_not_hallucinate": ["specific benchmark scores comparing RAG and SELF-RAG", "exact model parameter counts", "training dataset details"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must accurately contrast the fixed retrieval in RAG with adaptive retrieval in SELF-RAG",
+        "completeness_check": "Must mention reflection tokens, on-demand retrieval, and the controllability of SELF-RAG during inference",
+        "hallucination_traps": "A bad RAG system might invent specific quantitative comparisons or confuse SELF-RAG features with HyDE features"
+      },
+      "is_answerable": true,
+      "difficulty": "hard",
+      "expected_confidence_min": 0.60,
+      "retrieval_keywords": ["RAG", "SELF-RAG", "reflection tokens", "retrieval-augmented generation", "self-reflection", "adaptive retrieval", "on-demand"],
+      "notes": "Cross-paper comparison between the original RAG and SELF-RAG papers"
+    },
+    {
+      "id": "q016",
+      "question": "Compare greedy search, beam search, and sampling as text generation decoding strategies in HuggingFace Transformers. When should each be used?",
+      "tier": 2,
+      "category": "comparison",
+      "source_documents": ["generation_strategies.md", "llm_tutorial.md"],
+      "ground_truth_answer": "In HuggingFace Transformers: (1) Greedy search is the default strategy that selects the most likely next token at each step, generating up to 20 new tokens by default. It works well for short outputs where creativity is not a priority but breaks down on longer sequences because it begins to repeat itself. (2) Sampling (multinomial) randomly selects tokens based on probability distribution, enabled with do_sample=True and num_beams=1. It reduces repetition and generates more creative and diverse outputs. (3) Beam search keeps track of several generated sequences (beams) at each time step and selects the sequence with the highest overall probability. Enabled with num_beams > 1, it can 'look ahead' and is best suited for input-grounded tasks like describing an image or speech recognition. Beam search can be combined with sampling via do_sample=True.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "generation_strategies.md",
+          "approximate_location": "Greedy search section",
+          "key_passage": "Greedy search is the default decoding strategy. It selects the next most likely token at each step. Unless specified in GenerationConfig, this strategy generates a maximum of 20 new tokens. Greedy search works well for tasks with relatively short outputs where creativity is not a priority. However, it breaks down when generating longer sequences because it begins to repeat itself.",
+          "why_this_chunk": "This defines greedy search and its limitations from the Transformers docs"
+        },
+        {
+          "source_file": "generation_strategies.md",
+          "approximate_location": "Beam search section",
+          "key_passage": "Beam search keeps track of several generated sequences (beams) at each time step. After a certain number of steps, it selects the sequence with the highest overall probability. Unlike greedy search, this strategy can 'look ahead' and pick a sequence with a higher probability overall even if the initial tokens have a lower probability. It is best suited for input-grounded tasks, like describing an image or speech recognition.",
+          "why_this_chunk": "This defines beam search and its appropriate use cases"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["greedy search", "beam search", "sampling", "do_sample", "num_beams", "GenerationConfig"],
+        "must_not_hallucinate": ["specific perplexity scores for each strategy", "exact speed comparisons", "model-specific benchmarks"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must accurately describe each strategy's mechanism and recommended use case from the docs",
+        "completeness_check": "Must cover all three strategies with their parameters, strengths, and limitations",
+        "hallucination_traps": "A bad RAG system might invent additional decoding strategies or attribute wrong parameters to strategies"
+      },
+      "is_answerable": true,
+      "difficulty": "medium",
+      "expected_confidence_min": 0.70,
+      "retrieval_keywords": ["greedy search", "beam search", "sampling", "decoding strategy", "GenerationConfig", "do_sample", "num_beams", "text generation"],
+      "notes": "Requires combining multiple sections from generation_strategies.md"
+    },
+    {
+      "id": "q017",
+      "question": "What are all the different types of retrievers available in LangChain, and how does the EnsembleRetriever combine multiple retriever results?",
+      "tier": 2,
+      "category": "synthesis",
+      "source_documents": ["langchain/libs/langchain/langchain_classic/retrievers/__init__.py", "langchain/libs/langchain/langchain_classic/retrievers/ensemble.py"],
+      "ground_truth_answer": "LangChain provides numerous retriever types including: ContextualCompressionRetriever, EnsembleRetriever, MergerRetriever, MultiQueryRetriever, MultiVectorRetriever, ParentDocumentRetriever, RePhraseQueryRetriever, SelfQueryRetriever, and TimeWeightedVectorStoreRetriever as core retrievers. Community retrievers include BM25Retriever, TFIDFRetriever, WikipediaRetriever, PineconeHybridSearchRetriever, WeaviateHybridSearchRetriever, and many more. A retriever is more general than a vector store: it does not need to be able to store documents, only to return (or retrieve) them. The EnsembleRetriever ensembles multiple retrievers using weighted Reciprocal Rank Fusion. It accepts a list of retrievers with corresponding weights and a constant c (default 60) that controls the balance between high-ranked and lower-ranked items.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "langchain/libs/langchain/langchain_classic/retrievers/__init__.py",
+          "approximate_location": "Module docstring",
+          "key_passage": "Retriever class returns Documents given a text query. It is more general than a vector store. A retriever does not need to be able to store documents, only to return (or retrieve) it. Vector stores can be used as the backbone of a retriever, but there are other types of retrievers as well.",
+          "why_this_chunk": "This defines what a retriever is in LangChain's architecture"
+        },
+        {
+          "source_file": "langchain/libs/langchain/langchain_classic/retrievers/ensemble.py",
+          "approximate_location": "Module docstring and EnsembleRetriever class",
+          "key_passage": "Ensemble retriever that ensemble the results of multiple retrievers by using weighted Reciprocal Rank Fusion.",
+          "why_this_chunk": "This describes the specific fusion algorithm used by EnsembleRetriever"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["EnsembleRetriever", "Reciprocal Rank Fusion", "retriever", "vector store", "MultiQueryRetriever"],
+        "must_not_hallucinate": ["specific retrieval accuracy metrics", "benchmark results comparing retrievers", "exact implementation of Reciprocal Rank Fusion formula"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must accurately describe EnsembleRetriever as using weighted Reciprocal Rank Fusion",
+        "completeness_check": "Must list multiple retriever types and explain both the retriever concept and EnsembleRetriever mechanism",
+        "hallucination_traps": "A bad RAG system might invent retriever types not in the codebase or describe wrong fusion algorithms"
+      },
+      "is_answerable": true,
+      "difficulty": "medium",
+      "expected_confidence_min": 0.65,
+      "retrieval_keywords": ["EnsembleRetriever", "Reciprocal Rank Fusion", "retriever", "LangChain", "MultiQueryRetriever", "BM25Retriever", "vector store"],
+      "notes": "Requires synthesizing information from the retrievers __init__.py and ensemble.py files"
+    },
+    {
+      "id": "q018",
+      "question": "What are all the ways to reduce memory usage when training large language models with HuggingFace Transformers?",
+      "tier": 2,
+      "category": "synthesis",
+      "source_documents": ["perf_train_gpu_one.md", "deepspeed.md", "quantization/bitsandbytes.md"],
+      "ground_truth_answer": "HuggingFace Transformers offers multiple strategies to reduce memory during training: (1) Gradient accumulation: accumulates gradients over multiple mini-batches to simulate larger batch sizes with less memory. (2) Gradient checkpointing: trades compute for memory by recomputing activations during backward pass (~20% slower). (3) Mixed precision with bf16 or fp16 to reduce activation memory. (4) Memory-efficient optimizers like 8-bit AdamW from bitsandbytes that quantize optimizer states. (5) DeepSpeed ZeRO stages (1, 2, 3) that partition optimizer states, gradients, and parameters across devices, with ZeRO-3 + offload saving the most memory. (6) CPU/NVMe offloading of optimizer memory and computations. (7) Quantization via bitsandbytes with LLM.int8() (8-bit) or QLoRA (4-bit NF4) to compress models. (8) PEFT/LoRA to train only small adapter weights instead of all parameters.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "perf_train_gpu_one.md",
+          "approximate_location": "Feature comparison table",
+          "key_passage": "gradient accumulation | no | yes\ngradient checkpointing | no | yes\nmixed precision | yes | depends\noptimizers | yes | yes",
+          "why_this_chunk": "This table shows which techniques reduce memory usage"
+        },
+        {
+          "source_file": "deepspeed.md",
+          "approximate_location": "ZeRO stages table",
+          "key_passage": "ZeRO stage 1: partition optimizer states. ZeRO stage 2: partition optimizer and gradient states. ZeRO stage 3: partition optimizer, gradient, and parameters. Each stage progressively saves more memory, allowing really large models to fit and train on a single GPU.",
+          "why_this_chunk": "This explains the progressive memory savings of DeepSpeed ZeRO stages"
+        },
+        {
+          "source_file": "quantization/bitsandbytes.md",
+          "approximate_location": "Quantization features description",
+          "key_passage": "LLM.int8() - An 8-bit quantization method that makes inference more accessible without significant performance degradation. QLoRA - A 4-bit quantization technique that compresses models even further while maintaining trainability by inserting a small set of trainable low-rank adaptation (LoRA) weights.",
+          "why_this_chunk": "This describes quantization-based memory reduction approaches"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["gradient checkpointing", "DeepSpeed", "ZeRO", "quantization", "bitsandbytes", "mixed precision"],
+        "must_not_hallucinate": ["specific memory savings in GB for each technique on specific models", "exact training time impacts", "hardware-specific benchmarks"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Each technique must be accurately described as documented, including trade-offs",
+        "completeness_check": "Must cover at least 5 distinct memory reduction approaches from across the documentation",
+        "hallucination_traps": "A bad RAG system might invent specific memory reduction percentages or describe techniques not available in Transformers"
+      },
+      "is_answerable": true,
+      "difficulty": "hard",
+      "expected_confidence_min": 0.60,
+      "retrieval_keywords": ["memory", "training", "gradient checkpointing", "DeepSpeed", "ZeRO", "quantization", "bitsandbytes", "QLoRA", "offloading", "mixed precision"],
+      "notes": "Requires synthesizing memory reduction techniques across multiple HuggingFace documents"
+    },
+    {
+      "id": "q019",
+      "question": "How does the Transformer architecture's multi-head attention mechanism relate to the LoRA paper's choice of which weight matrices to adapt?",
+      "tier": 2,
+      "category": "multi_hop",
+      "source_documents": ["attention_paper.pdf", "lora_paper.pdf"],
+      "ground_truth_answer": "The Transformer's multi-head attention uses h=8 parallel attention heads, each with projection matrices Wq, Wk, Wv (for queries, keys, values) and Wo (output projection), where dk=dv=dmodel/h=64. Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions. The LoRA paper specifically studies adapting these attention weight matrices, noting that in the Transformer architecture there are four weight matrices in the self-attention module (Wq, Wk, Wv, Wo) and two in the MLP module. LoRA limits its study to only adapting the attention weights and freezes the MLP modules for simplicity and parameter-efficiency. On GPT-3 175B with r=4 and only query and value projection matrices adapted, the checkpoint size is reduced from 350GB to 35MB, roughly 10,000x reduction.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "attention_paper.pdf",
+          "approximate_location": "Section 3.2.2 Multi-Head Attention",
+          "key_passage": "In this work we employ h=8 parallel attention layers, or heads. For each of these we use dk=dv=dmodel/h=64. Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions.",
+          "why_this_chunk": "This describes the multi-head attention architecture that LoRA targets"
+        },
+        {
+          "source_file": "lora_paper.pdf",
+          "approximate_location": "Section 4.2 Applying LoRA to Transformer",
+          "key_passage": "In the Transformer architecture, there are four weight matrices in the self-attention module (Wq, Wk, Wv, Wo) and two in the MLP module. We limit our study to only adapting the attention weights for downstream tasks and freeze the MLP modules both for simplicity and parameter-efficiency.",
+          "why_this_chunk": "This explains LoRA's specific choice of which Transformer weights to adapt"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["multi-head attention", "Wq", "Wk", "Wv", "Wo", "LoRA", "self-attention", "MLP"],
+        "must_not_hallucinate": ["specific accuracy comparisons between adapting different weight matrices", "LoRA results on attention_paper benchmarks", "exact training configurations"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must correctly connect the attention mechanism's structure to LoRA's adaptation choices",
+        "completeness_check": "Must explain both the multi-head attention structure and LoRA's rationale for targeting attention weights specifically",
+        "hallucination_traps": "A bad RAG system might claim LoRA adapts MLP layers by default, contradicting the paper"
+      },
+      "is_answerable": true,
+      "difficulty": "hard",
+      "expected_confidence_min": 0.60,
+      "retrieval_keywords": ["multi-head attention", "Wq", "Wk", "Wv", "Wo", "LoRA", "Transformer", "self-attention", "weight matrices", "MLP"],
+      "notes": "Multi-hop question connecting the Transformer architecture paper to LoRA's adaptation strategy"
+    },
+    {
+      "id": "q020",
+      "question": "How does the concept of KV caching in HuggingFace Transformers relate to the attention mechanism described in the original Transformer paper?",
+      "tier": 2,
+      "category": "multi_hop",
+      "source_documents": ["kv_cache.md", "attention_paper.pdf"],
+      "ground_truth_answer": "In the Transformer paper, the attention mechanism computes outputs as a weighted sum of values using Attention(Q, K, V) = softmax(QK^T/sqrt(dk))V, requiring key and value vectors for every position. For autoregressive models that predict one token at a time, KV scores must be calculated every time because each prediction depends on previous tokens, leading to repeated computation. HuggingFace offers KV caching strategies (DynamicCache, StaticCache, QuantizedCache) to store and reuse these computations. DynamicCache is the default which grows dynamically. StaticCache pre-allocates a fixed maximum size, enabling torch.compile JIT optimizations but potentially wasting computation for shorter sequences. Cache offloading moves the KV cache to CPU to save GPU memory, useful for long-context generation. For models with sliding window attention, the cache stops growing when reaching the window size.",
+      "ground_truth_chunks": [
+        {
+          "source_file": "kv_cache.md",
+          "approximate_location": "Introduction section",
+          "key_passage": "The key-value (KV) vectors are used to calculate attention scores. For autoregressive models, KV scores are calculated every time because the model predicts one token at a time. Each prediction depends on the previous tokens, which means the model performs the same computations each time. A KV cache stores these calculations so they can be reused without recomputing them.",
+          "why_this_chunk": "This explains why KV caching is needed and how it relates to attention computation"
+        },
+        {
+          "source_file": "attention_paper.pdf",
+          "approximate_location": "Section 3.2.1 Scaled Dot-Product Attention",
+          "key_passage": "Attention(Q, K, V) = softmax(QK^T / sqrt(dk))V",
+          "why_this_chunk": "This is the attention formula whose key-value computations are being cached"
+        }
+      ],
+      "expected_retrieval": {
+        "min_relevant_chunks": 2,
+        "must_contain_terms": ["KV cache", "DynamicCache", "StaticCache", "attention", "autoregressive", "key-value"],
+        "must_not_hallucinate": ["specific memory savings numbers for each cache type", "exact inference speedup percentages", "cache sizes for specific models"]
+      },
+      "evaluation_criteria": {
+        "faithfulness_check": "Must correctly connect the attention formula's K,V matrices to the caching mechanism",
+        "completeness_check": "Must explain both the attention computation and how caching avoids redundant computation, covering at least 2 cache types",
+        "hallucination_traps": "A bad RAG system might invent specific cache size numbers or claim caching changes the attention computation"
+      },
+      "is_answerable": true,
+      "difficulty": "hard",
+      "expected_confidence_min": 0.60,
+      "retrieval_keywords": ["KV cache", "key-value cache", "DynamicCache", "StaticCache", "attention", "autoregressive", "torch.compile", "Transformer"],
+      "notes": "Multi-hop question connecting KV caching implementation to the attention mechanism theory"
+    },
+    {
+      "id": "q021",
+      "question": "What is the current pricing for using the HuggingFace Inference API for production deployments?",
+      "tier": 3,
+      "category": "adversarial_missing_from_corpus",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["specific dollar amounts", "pricing tiers", "rate limits", "free tier quotas", "enterprise pricing"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "Must not invent pricing tiers, dollar amounts, or rate limits not in the corpus",
+        "good_response": "A good response acknowledges that the corpus contains technical documentation about HuggingFace Transformers (Pipeline, Trainer, etc.) but does not contain commercial pricing information for the Inference API"
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.25,
+      "adversarial_type": "missing_from_corpus",
+      "notes": "The corpus has extensive HuggingFace technical docs but no pricing or commercial information. A plausible question because users of HuggingFace tools often need pricing info."
+    },
+    {
+      "id": "q022",
+      "question": "What proprietary training data was used to train Anthropic's Claude models, and what are the specific safety benchmarks it passes?",
+      "tier": 3,
+      "category": "adversarial_missing_from_corpus",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["specific training datasets", "training data composition percentages", "specific safety benchmark scores", "RLHF training details", "Constitutional AI specifics"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "Must not fabricate training data sources, safety benchmarks, or evaluation scores for Claude",
+        "good_response": "A good response notes that the corpus only contains the langchain-anthropic integration package description, which says nothing about Claude's training data or safety benchmarks"
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.20,
+      "adversarial_type": "missing_from_corpus",
+      "notes": "The corpus has only the LangChain Anthropic partner README, with no details about Claude's training or safety. The question sounds completely reasonable for someone exploring AI frameworks."
+    },
+    {
+      "id": "q023",
+      "question": "What is the maximum sequence length that LangChain's RecursiveCharacterTextSplitter can handle, and what are the recommended chunk sizes for RAG applications?",
+      "tier": 3,
+      "category": "adversarial_missing_from_corpus",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["specific maximum sequence lengths", "recommended chunk sizes in tokens or characters", "optimal overlap values", "benchmark-backed chunk size recommendations"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "Must not invent specific chunk size recommendations, maximum lengths, or configuration values",
+        "good_response": "A good response notes that while RecursiveCharacterTextSplitter is mentioned in the LangChain text_splitter.py imports, the corpus contains no configuration documentation with specific recommended chunk sizes or maximum lengths"
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.30,
+      "adversarial_type": "missing_from_corpus",
+      "notes": "The text_splitter.py file only contains imports. The actual documentation with configuration details is not in the corpus. Common RAG question that would tempt fabrication."
+    },
+    {
+      "id": "q024",
+      "question": "Which is better for building a production RAG system: using HuggingFace's built-in Pipeline or LangChain's retrieval chain approach?",
+      "tier": 3,
+      "category": "adversarial_ambiguous",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["definitive recommendation for one over the other", "performance comparison metrics", "production deployment benchmarks", "specific use case recommendations"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "Must not fabricate a comparative evaluation or recommend one approach over the other. The corpus describes both tools separately but makes no comparison for RAG production use",
+        "good_response": "A good response acknowledges that the corpus describes HuggingFace Pipeline (inference API for ML tasks) and LangChain retrieval components separately, but contains no comparative evaluation for production RAG systems. It should note the tools serve different purposes."
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.25,
+      "adversarial_type": "ambiguous",
+      "notes": "Both HuggingFace and LangChain are extensively documented in the corpus, but no comparison exists. Tempts the system to make a subjective recommendation."
+    },
+    {
+      "id": "q025",
+      "question": "Should I use LoRA with rank 4 or rank 8 for fine-tuning a 7B parameter model, and what performance difference should I expect?",
+      "tier": 3,
+      "category": "adversarial_ambiguous",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["specific accuracy differences between rank 4 and rank 8", "exact memory usage comparisons for a 7B model", "definitive rank recommendations", "benchmark-backed performance numbers for specific ranks"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "Must not invent performance comparisons between rank values. The LoRA paper mentions rank can be very low (even 1 or 2) and the HF example uses r=8, but no 7B model comparison exists",
+        "good_response": "A good response notes that the LoRA paper states 'a very low rank (i.e., r can be one or two) suffices' and the HF docs show r=8 as an example, but the corpus contains no specific comparison of rank 4 vs rank 8 on a 7B model or expected performance differences"
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.30,
+      "adversarial_type": "ambiguous",
+      "notes": "The corpus has general LoRA information but no specific rank comparison for 7B models. Partial information exists but not enough for a confident answer."
+    },
+    {
+      "id": "q026",
+      "question": "Is the SciFact BEIR dataset suitable for evaluating biomedical question-answering systems, and how does it compare to PubMedQA for this purpose?",
+      "tier": 3,
+      "category": "adversarial_ambiguous",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["comparative evaluation metrics between SciFact and PubMedQA", "specific suitability scores", "benchmark results comparing the datasets", "expert recommendations"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "Must not fabricate a comparison with PubMedQA. The corpus contains SciFact data (corpus and queries for fact verification) but has no information about PubMedQA or comparative evaluations",
+        "good_response": "A good response notes that SciFact is present in the corpus as part of the BEIR benchmark for fact-checking tasks with scientific claims and evidence, but PubMedQA is not in the corpus and no dataset comparison exists"
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.30,
+      "adversarial_type": "ambiguous",
+      "notes": "SciFact data exists in the corpus but not in the context of QA evaluation comparison. PubMedQA is entirely absent from the corpus."
+    },
+    {
+      "id": "q027",
+      "question": "What is the latest version of the LangChain Python package and what new features were added in the most recent release?",
+      "tier": 3,
+      "category": "adversarial_outdated",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["specific version numbers", "release dates", "changelog items", "new feature lists", "deprecation notices"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "Must not invent version numbers, release dates, or feature lists. The corpus contains the LangChain source code and README but no version-specific release notes",
+        "good_response": "A good response acknowledges that the corpus contains LangChain source code and documentation, but package version information changes frequently and no specific version number or release notes are available in the current corpus"
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.20,
+      "adversarial_type": "outdated",
+      "notes": "Version information is inherently time-sensitive. The corpus has LangChain code but no pinned version numbers or release notes."
+    },
+    {
+      "id": "q028",
+      "question": "What are the current state-of-the-art BLEU scores for English-to-German translation, and which model architecture achieves them?",
+      "tier": 3,
+      "category": "adversarial_outdated",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["current BLEU scores from recent years", "specific model names achieving current SOTA", "leaderboard rankings", "recent benchmark results"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "Must not present the 2017 Transformer paper's BLEU score of 28.4 as the current state-of-the-art. Must flag that leaderboard results change over time and the corpus data may be outdated",
+        "good_response": "A good response notes that the Attention Is All You Need paper (2017) reports 28.4 BLEU on WMT 2014 English-to-German, but this is from 2017 and current SOTA scores are likely significantly higher. It should flag the temporal limitation of the corpus."
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.25,
+      "adversarial_type": "outdated",
+      "notes": "The attention paper has a BLEU score from 2017 that is far from current SOTA. A system might incorrectly present this as current."
+    },
+    {
+      "id": "q029",
+      "question": "How many ZeRO stages does DeepSpeed support, and does the LangChain documentation recommend using DeepSpeed for training agents?",
+      "tier": 3,
+      "category": "adversarial_conflicting",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["LangChain documentation about DeepSpeed integration", "recommendations for combining DeepSpeed with LangChain", "specific training configurations for LangChain agents"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "While HuggingFace docs describe DeepSpeed ZeRO stages 1-3 for model training, the corpus contains no information about using DeepSpeed with LangChain. The system must not fabricate a connection between them",
+        "good_response": "A good response correctly states that HuggingFace docs describe DeepSpeed ZeRO stages 1, 2, and 3 for distributed training, but notes that LangChain documentation in the corpus does not discuss DeepSpeed integration at all. These are separate ecosystems in the corpus with no documented interaction."
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.30,
+      "adversarial_type": "conflicting",
+      "notes": "This question spans two corpus domains (HuggingFace and LangChain) that don't overlap. A system might incorrectly merge information from both."
+    },
+    {
+      "id": "q030",
+      "question": "The RAG paper and the LangChain documentation both describe retrieval-augmented generation. Do they agree on the recommended number of documents to retrieve per query?",
+      "tier": 3,
+      "category": "adversarial_conflicting",
+      "source_documents": [],
+      "ground_truth_answer": null,
+      "ground_truth_chunks": [],
+      "expected_retrieval": {
+        "min_relevant_chunks": 0,
+        "must_contain_terms": [],
+        "must_not_hallucinate": ["a specific agreed-upon number of documents", "LangChain's recommended retrieval count", "the RAG paper's recommended K value for production", "consensus between the sources"]
+      },
+      "evaluation_criteria": {
+        "abstention_check": "System MUST return is_answerable: false",
+        "no_fabrication": "The RAG paper describes retrieving top-K documents but does not prescribe a specific K for all use cases. LangChain's retriever code in the corpus contains no recommended number of documents. The system must not fabricate agreement or a recommended number",
+        "good_response": "A good response notes that the RAG paper mentions top-K retrieval as a concept but the corpus does not contain a specific recommended K value. LangChain's source code defines retriever interfaces but does not prescribe a default number of documents. The two sources discuss retrieval differently (academic formulation vs software framework) and no direct agreement or disagreement on a specific number exists in the corpus."
+      },
+      "is_answerable": false,
+      "difficulty": "adversarial",
+      "expected_confidence_max": 0.25,
+      "adversarial_type": "conflicting",
+      "notes": "Both sources mention retrieval but address it at different levels of abstraction. No specific number agreement exists in the corpus. Tempts the system to fabricate consensus."
+    }
+  ]
+}

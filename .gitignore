@@ -1,0 +1,22 @@
+# Environment
+.env
+.rag_bench/
+
+# Data - too large for git
+data/raw/
+qdrant_storage/
+bm25_index.pkl
+pipeline_monitor.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Logs
+logs/
+*.log
+
+# VS Code
+.vscode/
