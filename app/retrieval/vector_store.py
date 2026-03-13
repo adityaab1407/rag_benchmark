@@ -58,13 +58,13 @@ class VectorStore:
                     match=MatchValue(value=strategy_filter)
                 )]
             )
-        results = self.client.search(
-            collection_name=self.collection_name,
-            query_vector=query_embedding,
-            limit=top_k,
-            query_filter=query_filter,
-            with_payload=True
-        )
+        results = self.client.query_points(
+    collection_name=self.collection_name,
+    query=query_embedding,
+    limit=top_k,
+    query_filter=query_filter,
+    with_payload=True
+).points
         return [
             {
                 "content": r.payload["content"],
