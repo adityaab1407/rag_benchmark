@@ -44,7 +44,6 @@ from loguru import logger
 
 def load_golden_dataset(path: str = "data/golden_dataset.json") -> Dict:
     data = json.loads(Path(path).read_text())
-    # Index by question id for fast lookup
     return {q["id"]: q for q in data["questions"]}
 
 
@@ -53,7 +52,6 @@ def load_benchmark_csv(path: str) -> List[Dict]:
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Skip errored rows
             if "ERROR" not in str(row.get("answer", "")):
                 results.append(row)
     return results
@@ -63,12 +61,9 @@ def compute_recall_at_k(
     retrieved_chunks: List[Dict],
     expected_sources: List[str],
     k: int
-) -> float:
-    # Did any of the top K chunks come from the expected source files?
-    # Returns 1.0 if yes, 0.0 if no
+) -> Optional[float]:
     if not expected_sources:
-        return None     # Tier 3 - no expected sources, skip
-
+        return None
     top_k = retrieved_chunks[:k]
     for chunk in top_k:
         source = chunk.get("metadata", {}).get("filename", "")
@@ -82,32 +77,25 @@ def compute_mrr(
     retrieved_chunks: List[Dict],
     expected_sources: List[str]
 ) -> Optional[float]:
-    # At what rank did the first relevant chunk appear?
     if not expected_sources:
-        return None     # Tier 3 - skip
-
+        return None
     for rank, chunk in enumerate(retrieved_chunks, start=1):
         source = chunk.get("metadata", {}).get("filename", "")
         for expected in expected_sources:
             if expected.lower() in source.lower():
-                return 1.0 / rank   # found at rank N = score 1/N
-
-    return 0.0  # not found at all
+                return 1.0 / rank
+    return 0.0
 
 
 def compute_term_hit_rate(
     retrieved_chunks: List[Dict],
     must_contain_terms: List[str]
 ) -> Optional[float]:
-    # Did any retrieved chunk contain ALL must_contain_terms?
-    # Returns proportion of terms found across all chunks
     if not must_contain_terms:
         return None
-
     all_content = " ".join([
         c.get("content", "") for c in retrieved_chunks
     ]).lower()
-
     hits = sum(
         1 for term in must_contain_terms
         if term.lower() in all_content
@@ -120,15 +108,107 @@ def compute_confidence_calibration(
     is_answerable: bool,
     golden: Dict
 ) -> float:
-    # Is the confidence appropriate for this question?
-    # Answerable: should be >= expected_confidence_min
-    # Unanswerable: should be <= expected_confidence_max
     if is_answerable:
         expected_min = golden.get("expected_confidence_min", 0.7)
         return 1.0 if confidence >= expected_min else 0.0
     else:
         expected_max = golden.get("expected_confidence_max", 0.3)
         return 1.0 if confidence <= expected_max else 0.0
+
+
+def analyze_sources(
+    benchmark_csv_path: str,
+    golden_dataset_path: str = "data/golden_dataset.json"
+) -> Dict:
+    golden = load_golden_dataset(golden_dataset_path)
+    results = load_benchmark_csv(benchmark_csv_path)
+
+    # Expected sources from golden dataset
+    expected_sources = {}
+    for qid, g in golden.items():
+        sources = g.get("source_documents", [])
+        for s in sources:
+            expected_sources[s] = expected_sources.get(s, 0) + 1
+
+    # Category breakdown from golden dataset
+    categories = {}
+    for qid, g in golden.items():
+        cat = g.get("category", "unknown")
+        categories[cat] = categories.get(cat, 0) + 1
+
+    # Corpus breakdown - which doc types are in the golden dataset
+    corpus_groups = {
+        "huggingface": [],
+        "langchain":   [],
+        "anthropic":   [],
+        "papers":      [],
+        "beir":        [],
+        "other":       []
+    }
+    for qid, g in golden.items():
+        sources = g.get("source_documents", [])
+        placed = False
+        for s in sources:
+            s_lower = s.lower()
+            if any(x in s_lower for x in ["peft", "transformers", "llm_tutorial", "pipeline", "tokeniz"]):
+                corpus_groups["huggingface"].append(qid)
+                placed = True
+            elif any(x in s_lower for x in ["langchain", "lcel", "agent", "chain"]):
+                corpus_groups["langchain"].append(qid)
+                placed = True
+            elif "anthropic" in s_lower:
+                corpus_groups["anthropic"].append(qid)
+                placed = True
+            elif any(x in s_lower for x in ["paper", "pdf", "lora", "rag", "attention", "selfrag"]):
+                corpus_groups["papers"].append(qid)
+                placed = True
+            elif "scifact" in s_lower or "beir" in s_lower:
+                corpus_groups["beir"].append(qid)
+                placed = True
+        if not placed and not sources:
+            corpus_groups["other"].append(qid)
+
+    # Per strategy source hits
+    strategy_source_hits = {}
+    for row in results:
+        strategy = row["strategy"]
+        qid = row["question_id"]
+        if qid not in golden:
+            continue
+        g = golden[qid]
+        expected = g.get("source_documents", [])
+        answer = row.get("answer", "").lower()
+
+        if strategy not in strategy_source_hits:
+            strategy_source_hits[strategy] = {}
+
+        for src in expected:
+            src_stem = src.replace(".md", "").replace(".pdf", "").replace("_", " ").lower()
+            hit = src_stem in answer or src.lower() in answer
+            if src not in strategy_source_hits[strategy]:
+                strategy_source_hits[strategy][src] = {"expected": 0, "hit": 0}
+            strategy_source_hits[strategy][src]["expected"] += 1
+            if hit:
+                strategy_source_hits[strategy][src]["hit"] += 1
+
+    # Top sources from CSV if top_sources column exists
+    csv_sources = {}
+    for row in results:
+        top_src_field = row.get("top_sources", "")
+        if top_src_field:
+            for src in top_src_field.split("|"):
+                src = src.strip()
+                if src and src != "unknown":
+                    csv_sources[src] = csv_sources.get(src, 0) + 1
+
+    return {
+        "expected_sources":      expected_sources,
+        "categories":            categories,
+        "corpus_groups":         {k: len(v) for k, v in corpus_groups.items()},
+        "corpus_group_details":  corpus_groups,
+        "strategy_source_hits":  strategy_source_hits,
+        "csv_sources":           csv_sources,
+    }
 
 
 def evaluate_benchmark(
@@ -142,7 +222,6 @@ def evaluate_benchmark(
     results = load_benchmark_csv(benchmark_csv_path)
     logger.info("Loaded {} successful results", len(results))
 
-    # Group results by strategy
     by_strategy = {}
     for row in results:
         s = row["strategy"]
@@ -155,10 +234,6 @@ def evaluate_benchmark(
     for strategy_name, rows in by_strategy.items():
         logger.info("Evaluating strategy: {}", strategy_name)
 
-        recall_1_scores = []
-        recall_3_scores = []
-        recall_5_scores = []
-        mrr_scores = []
         term_hit_scores = []
         abstention_scores = []
         calibration_scores = []
@@ -169,7 +244,6 @@ def evaluate_benchmark(
                 continue
 
             g = golden[qid]
-            expected_sources = g.get("source_documents", [])
             must_contain_terms = g.get("expected_retrieval", {}).get(
                 "must_contain_terms", []
             )
@@ -179,12 +253,6 @@ def evaluate_benchmark(
                 row.get("is_answerable", "false")
             ).lower() == "true"
 
-            # For retrieval metrics we need the actual chunks
-            # Benchmark CSV stores answer text only, not chunks
-            # So we use term_hit_rate as proxy for retrieval quality
-            # Full retrieval metrics require re-running with chunk logging
-
-            # Term hit rate - best proxy from CSV data
             term_hit = compute_term_hit_rate(
                 [{"content": row.get("answer", "")}],
                 must_contain_terms
@@ -192,13 +260,11 @@ def evaluate_benchmark(
             if term_hit is not None:
                 term_hit_scores.append(term_hit)
 
-            # Abstention accuracy
             abstention_correct = (
                 is_answerable_actual == is_answerable_expected
             )
             abstention_scores.append(1.0 if abstention_correct else 0.0)
 
-            # Confidence calibration
             cal = compute_confidence_calibration(
                 confidence,
                 is_answerable_expected,
@@ -210,21 +276,21 @@ def evaluate_benchmark(
             return round(sum(scores) / len(scores), 3) if scores else 0.0
 
         strategy_metrics[strategy_name] = {
-            "total_questions":      len(rows),
-            "term_hit_rate":        safe_avg(term_hit_scores),
-            "abstention_accuracy":  safe_avg(abstention_scores),
+            "total_questions":        len(rows),
+            "term_hit_rate":          safe_avg(term_hit_scores),
+            "abstention_accuracy":    safe_avg(abstention_scores),
             "confidence_calibration": safe_avg(calibration_scores),
-            "avg_confidence":       round(
+            "avg_confidence":         round(
                 sum(float(r["confidence"]) for r in rows) / len(rows), 3
             ),
-            "avg_latency":          round(
+            "avg_latency":            round(
                 sum(float(r["total_latency"]) for r in rows) / len(rows), 3
             ),
-            "answered_count":       sum(
+            "answered_count":         sum(
                 1 for r in rows
                 if str(r.get("is_answerable", "false")).lower() == "true"
             ),
-            "abstained_count":      sum(
+            "abstained_count":        sum(
                 1 for r in rows
                 if str(r.get("is_answerable", "false")).lower() == "false"
             ),
@@ -240,7 +306,6 @@ def evaluate_benchmark(
             strategy_metrics[strategy_name]["avg_latency"],
         )
 
-    # Find best strategy per metric
     best = {}
     if strategy_metrics:
         best["term_hit_rate"] = max(
@@ -261,18 +326,16 @@ def evaluate_benchmark(
         )
 
     return {
-        "strategies": strategy_metrics,
-        "best": best,
-        "total_results": len(results),
+        "strategies":          strategy_metrics,
+        "best":                best,
+        "total_results":       len(results),
         "questions_evaluated": len(set(r["question_id"] for r in results))
     }
 
 
 if __name__ == "__main__":
     import sys
-    from pathlib import Path
 
-    # Find the latest benchmark CSV automatically
     results_dir = Path("results")
     csvs = sorted(results_dir.glob("benchmark_*.csv"))
 
@@ -312,7 +375,56 @@ if __name__ == "__main__":
         print("  {:25} {}".format(metric, winner))
 
     print()
-    print("Questions evaluated: {}/30".format(
-        report["questions_evaluated"]
-    ))
-    print("Note: Full Recall@K requires re-run with chunk logging")
+    print("Questions evaluated: {}/30".format(report["questions_evaluated"]))
+    print()
+
+    # Source analysis
+    print("=" * 65)
+    print("SOURCE DOCUMENT ANALYSIS")
+    print("=" * 65)
+
+    source_report = analyze_sources(str(latest))
+
+    print()
+    print("CORPUS BREAKDOWN (questions per source group):")
+    print("-" * 40)
+    for group, count in source_report["corpus_groups"].items():
+        bar = "#" * count
+        print("  {:15} {:>3} questions  {}".format(group, count, bar))
+
+    print()
+    print("QUESTION CATEGORIES:")
+    print("-" * 40)
+    for cat, count in sorted(
+        source_report["categories"].items(),
+        key=lambda x: x[1],
+        reverse=True
+    ):
+        print("  {:40} {}".format(cat, count))
+
+    print()
+    print("EXPECTED SOURCE FILES (how often each file is the answer):")
+    print("-" * 40)
+    for src, count in sorted(
+        source_report["expected_sources"].items(),
+        key=lambda x: x[1],
+        reverse=True
+    ):
+        bar = "#" * count
+        print("  {:35} {:>2}x  {}".format(src, count, bar))
+
+    if source_report["csv_sources"]:
+        print()
+        print("MOST RETRIEVED SOURCE FILES (from benchmark CSV):")
+        print("-" * 40)
+        for src, count in sorted(
+            source_report["csv_sources"].items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:10]:
+            bar = "#" * count
+            print("  {:35} {:>2}x  {}".format(src, count, bar))
+
+    print()
+    print("NOTE: Full Recall@K requires chunk metadata in CSV")
+    print("      Tomorrow's complete benchmark will enable this")

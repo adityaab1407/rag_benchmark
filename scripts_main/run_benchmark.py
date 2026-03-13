@@ -27,8 +27,6 @@ def load_golden_dataset():
 
 
 def load_existing_results():
-    # Find the latest benchmark CSV and load completed rows
-    # Returns (existing_results, completed_set)
     completed = set()
     existing_results = []
 
@@ -46,8 +44,7 @@ def load_existing_results():
     with open(latest, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Only keep rows that succeeded - re-run errored ones
-            if "ERROR" not in row["answer"]:
+            if "ERROR" not in str(row.get("answer", "")):
                 existing_results.append(row)
                 completed.add((row["question_id"], row["strategy"]))
 
@@ -63,17 +60,14 @@ def run_benchmark():
     logger.info("RAG BENCHMARK RUNNER")
     logger.info("=" * 60)
 
-    # Load existing results first - resume from where we left off
     existing_results, completed = load_existing_results()
 
-    # Load components once - reused by all strategies
     logger.info("Loading components...")
     embedder = Embedder()
     vector_store = VectorStore()
     bm25_store = BM25Store()
     bm25_store.load_index()
 
-    # Initialise all strategies
     strategies = {
         "naive":    NaiveRAG(embedder, vector_store),
         "hybrid":   HybridRAG(embedder, vector_store, bm25_store),
@@ -82,15 +76,12 @@ def run_benchmark():
     }
     logger.info("All strategies ready")
 
-    # Load golden dataset
     questions = load_golden_dataset()
     logger.info("Loaded {} questions from golden dataset", len(questions))
 
-    # Results storage - start with existing completed results
     results = existing_results.copy()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Count how many we actually need to run
     remaining = sum(
         1 for q in questions
         for s in strategies
@@ -110,13 +101,12 @@ def run_benchmark():
         tier = q.get("tier", 0)
         is_answerable = q.get("is_answerable", True)
 
-        # Check if all strategies for this question are done
         all_done = all(
             (question_id, s) in completed
             for s in strategies
         )
         if all_done:
-            logger.info("Skipping q{} - all strategies completed", question_id)
+            logger.info("Skipping {} - all strategies completed", question_id)
             continue
 
         logger.info(
@@ -128,7 +118,6 @@ def run_benchmark():
 
         for strategy_name, strategy in strategies.items():
 
-            # Skip already completed
             if (question_id, strategy_name) in completed:
                 logger.info("  Skipping {}/{} - already done", question_id, strategy_name)
                 continue
@@ -141,6 +130,14 @@ def run_benchmark():
 
             try:
                 result = strategy.run(question_text, top_k=5)
+
+                # Extract top source files from retrieved chunks
+                top_sources = []
+                if result.retrieved_chunks:
+                    for chunk in result.retrieved_chunks[:3]:
+                        fname = chunk.get("metadata", {}).get("filename", "unknown")
+                        if fname and fname not in top_sources:
+                            top_sources.append(fname)
 
                 row = {
                     "question_id":          question_id,
@@ -155,27 +152,36 @@ def run_benchmark():
                     "retrieve_latency":     result.latency["retrieve"],
                     "generate_latency":     result.latency["generate"],
                     "total_latency":        result.latency["total"],
+                    "top_sources":          "|".join(top_sources),
                 }
                 results.append(row)
                 strategies_run_this_question += 1
 
                 logger.info(
-                    "    confidence={} answerable={} latency={}s",
+                    "    confidence={} answerable={} latency={}s sources={}",
                     result.confidence,
                     result.is_answerable,
-                    result.latency["total"]
+                    result.latency["total"],
+                    top_sources
                 )
 
             except Exception as e:
                 error_msg = str(e)
                 logger.error("    FAILED: {}", error_msg)
 
-                # Check if rate limited - wait and retry once
                 if "rate_limit" in error_msg.lower() or "429" in error_msg:
                     logger.warning("Rate limit hit - waiting 60s before retrying...")
                     time.sleep(60)
                     try:
                         result = strategy.run(question_text, top_k=5)
+
+                        top_sources = []
+                        if result.retrieved_chunks:
+                            for chunk in result.retrieved_chunks[:3]:
+                                fname = chunk.get("metadata", {}).get("filename", "unknown")
+                                if fname and fname not in top_sources:
+                                    top_sources.append(fname)
+
                         row = {
                             "question_id":          question_id,
                             "tier":                 tier,
@@ -189,6 +195,7 @@ def run_benchmark():
                             "retrieve_latency":     result.latency["retrieve"],
                             "generate_latency":     result.latency["generate"],
                             "total_latency":        result.latency["total"],
+                            "top_sources":          "|".join(top_sources),
                         }
                         results.append(row)
                         strategies_run_this_question += 1
@@ -197,7 +204,6 @@ def run_benchmark():
                     except Exception as e2:
                         logger.error("    Retry also failed: {}", e2)
 
-                # Record the failure
                 results.append({
                     "question_id":          question_id,
                     "tier":                 tier,
@@ -211,10 +217,10 @@ def run_benchmark():
                     "retrieve_latency":     0.0,
                     "generate_latency":     0.0,
                     "total_latency":        0.0,
+                    "top_sources":          "",
                 })
 
         # Save progress after every question
-        # If the script crashes we don't lose everything
         if strategies_run_this_question > 0:
             Path("results").mkdir(exist_ok=True)
             checkpoint_path = "results/benchmark_{}.csv".format(timestamp)
@@ -224,8 +230,6 @@ def run_benchmark():
                 writer.writerows(results)
             logger.info("Progress saved to {}", checkpoint_path)
 
-        # Wait between questions to avoid rate limits
-        # 10 seconds = ~360 tokens/min headroom
         if strategies_run_this_question > 0 and current < remaining:
             logger.info("Waiting 10s before next question...")
             time.sleep(10)
@@ -240,12 +244,13 @@ def run_benchmark():
 
     logger.info("Final results saved to {}", final_path)
 
-    # Print summary table
+    # Summary table
     logger.info("\n" + "=" * 60)
     logger.info("BENCHMARK SUMMARY")
     logger.info("=" * 60)
 
-    for strategy_name in strategies.keys():
+    strategy_names = ["naive", "hybrid", "hyde", "reranked"]
+    for strategy_name in strategy_names:
         strategy_results = [
             r for r in results
             if r["strategy"] == strategy_name
