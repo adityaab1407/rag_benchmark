@@ -5,25 +5,32 @@ from app.main import app_state
 
 router = APIRouter(prefix="/api/v1")
 
+AVAILABLE_STRATEGIES = {
+    "naive":    "naive_rag",
+    "hybrid":   "hybrid_rag",
+    "hyde":     "hyde_rag",
+    "reranked": "reranked_rag",
+}
+
 
 @router.get("/health")
 async def health():
-    # Quick check that server and components are alive
     return {
         "status": "healthy",
         "components": {
-            "embedder": "embedder" in app_state,
+            "embedder":     "embedder" in app_state,
             "vector_store": "vector_store" in app_state,
-            "bm25_store": "bm25_store" in app_state,
-            "naive_rag": "naive_rag" in app_state,
+            "bm25_store":   "bm25_store" in app_state,
+            "naive_rag":    "naive_rag" in app_state,
+            "hybrid_rag":   "hybrid_rag" in app_state,
+            "hyde_rag":     "hyde_rag" in app_state,
+            "reranked_rag": "reranked_rag" in app_state,
         }
     }
 
 
 @router.get("/strategies")
 async def list_strategies():
-    # Lists all available RAG strategies
-    # More will be added as Days 3-5 complete
     return {
         "strategies": [
             {
@@ -34,17 +41,17 @@ async def list_strategies():
             {
                 "name": "hybrid",
                 "description": "BM25 + vector search with RRF fusion.",
-                "status": "coming soon"
+                "status": "available"
             },
             {
                 "name": "hyde",
-                "description": "Hypothetical document embeddings.",
-                "status": "coming soon"
+                "description": "Hypothetical document embeddings for better complex query retrieval.",
+                "status": "available"
             },
             {
                 "name": "reranked",
-                "description": "Hybrid search + cross-encoder reranking.",
-                "status": "coming soon"
+                "description": "Hybrid search + cross-encoder reranking. Best quality.",
+                "status": "available"
             }
         ]
     }
@@ -52,23 +59,36 @@ async def list_strategies():
 
 @router.post("/query", response_model=RAGResult)
 async def query(request: QueryRequest):
-    # Main endpoint - runs RAG pipeline and returns structured result
-    logger.info("Query received: strategy={} question={}", request.strategy, request.question[:60])
+    logger.info(
+        "Query received: strategy={} question={}",
+        request.strategy,
+        request.question[:60]
+    )
 
-    if request.strategy == "naive":
-        if "naive_rag" not in app_state:
-            raise HTTPException(status_code=503, detail="Naive RAG not initialised")
-        result = app_state["naive_rag"].run(request.question, request.top_k or 5)
-
-    else:
+    if request.strategy not in AVAILABLE_STRATEGIES:
         raise HTTPException(
             status_code=400,
-            detail="Strategy '{}' not available yet. Use: naive".format(request.strategy)
+            detail="Unknown strategy '{}'. Available: {}".format(
+                request.strategy,
+                list(AVAILABLE_STRATEGIES.keys())
+            )
         )
 
+    state_key = AVAILABLE_STRATEGIES[request.strategy]
+
+    if state_key not in app_state:
+        raise HTTPException(
+            status_code=503,
+            detail="{} not initialised - check server logs".format(request.strategy)
+        )
+
+    result = app_state[state_key].run(request.question, request.top_k or 5)
+
     logger.info(
-        "Query complete: confidence={} latency={}s",
+        "Query complete: strategy={} confidence={} latency={}s",
+        request.strategy,
         result.confidence,
         result.latency["total"]
     )
+
     return result
