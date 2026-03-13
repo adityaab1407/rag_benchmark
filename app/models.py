@@ -1,11 +1,10 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict
 from enum import Enum
 
 
 # Enums = fixed set of allowed values
 # Prevents typos like "hybrd" instead of "hybrid"
-
 class SeverityLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
@@ -24,7 +23,6 @@ class RAGStrategy(str, Enum):
 # Instructor enforces this shape - no free text allowed.
 # If LLM returns plain text, Instructor retries until
 # it gets a proper RAGResponse object.
-
 class RAGResponse(BaseModel):
     answer: str
     confidence: float       # 0.0 to 1.0
@@ -59,7 +57,6 @@ class RAGResult(BaseModel):
 
 
 # API request shapes
-
 class QueryRequest(BaseModel):
     question: str
     strategy: str = "naive"
@@ -68,13 +65,35 @@ class QueryRequest(BaseModel):
 
 class BenchmarkRequest(BaseModel):
     question: str
-    run_all_strategies: bool = True
+    top_k: Optional[int] = 5
+
+
+# StrategyComparison = one row in the comparison table
+# Shows how a single strategy performed on the benchmark question
+class StrategyComparison(BaseModel):
+    strategy: str
+    answer: str
+    confidence: float
+    is_answerable: bool
+    latency: Dict[str, float]   # retrieve, generate, total
+    top_chunk_score: float      # score of the best retrieved chunk
+    retrieval_method: str       # vector / hybrid_rrf / hyde / reranked
+
+
+# BenchmarkResult = the full response from /api/v1/benchmark
+# Contains all 4 strategy results + a comparison summary
+class BenchmarkResult(BaseModel):
+    query: str
+    strategies: List[StrategyComparison]    # one per strategy
+    best_strategy: str                       # highest confidence
+    fastest_strategy: str                    # lowest total latency
+    total_time: float                        # wall clock time for all 4
+    summary: str                             # human readable comparison
 
 
 # Human in the loop
 # When agent cannot fix something it escalates to human
 # Human responds via API with this model
-
 class HumanApproval(BaseModel):
     anomaly_id: int
     approved: bool
@@ -82,7 +101,6 @@ class HumanApproval(BaseModel):
 
 
 # Evaluation models
-
 class EvalScore(BaseModel):
     question_id: str
     strategy: str

@@ -181,6 +181,16 @@ class RerankedRAG:
             }
         )
 
+    async def run_async(self, query: str, top_k: int = 5) -> RAGResult:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            self.run,
+            query,
+            top_k
+        )
+        return result
 
 if __name__ == "__main__":
     from app.ingestion.embedder import Embedder

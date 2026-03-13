@@ -101,6 +101,21 @@ class NaiveRAG:
                 "total": total_latency
             }
         )
+    
+    async def run_async(self, query: str, top_k: int = 5) -> RAGResult:
+        # Wraps the sync run() method for async/concurrent execution
+        # run_in_executor runs sync code in a thread pool
+        # This frees the FastAPI event loop to handle other tasks
+        # while waiting for Groq to respond
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,       # None = use default thread pool
+            self.run,   # sync function to run
+            query,      # arg 1
+            top_k       # arg 2
+        )
+        return result
 
 if __name__ == "__main__":
     from app.ingestion.embedder import Embedder
