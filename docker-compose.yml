@@ -1,28 +1,83 @@
 version: "3.9"
+
 services:
+
+  # ── Qdrant vector database ──────────────────────────────────────────────────
   qdrant:
-    image: qdrant/qdrant
+    image: qdrant/qdrant:latest
+    container_name: rag_qdrant
     ports:
       - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ── Redis cache ──────────────────────────────────────────────────────────────
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
+    container_name: rag_redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  app:
-    build: .
+  # ── FastAPI app ──────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_api
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
-    env_file:
-      - .env
+      - ./data:/app/data                     # golden dataset
+      - ./results:/app/results               # benchmark CSVs
+      - qdrant_storage:/app/qdrant_storage   # shared with qdrant service
+      - ./bm25_index.pkl:/app/bm25_index.pkl # BM25 index
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - QDRANT_HOST=qdrant                   # use service name not localhost
+      - QDRANT_PORT=6333
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - QDRANT_PATH=                         # empty = use host mode not local file
     depends_on:
-      - qdrant
-      - redis
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Streamlit dashboard ──────────────────────────────────────────────────────
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: rag_streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+    environment:
+      - API_BASE=http://api:8000/api/v1      # use service name
+    depends_on:
+      - api
+    restart: unless-stopped
 
 volumes:
   qdrant_storage:
+  redis_data:
