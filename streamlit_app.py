@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 import json
 from pathlib import Path
 
@@ -20,158 +19,108 @@ STRATEGY_COLORS = {
     "reranked": "#F0997B",
 }
 
+SAMPLE_QUESTIONS = [
+    "What is LoRA and how does it reduce trainable parameters?",
+    "What are the two RAG formulations introduced in the original RAG paper?",
+    "How does the attention mechanism work in transformers?",
+    "What is the difference between RAG-Token and RAG-Sequence?",
+    "How does BitsAndBytes quantization reduce memory usage?",
+]
+
 st.set_page_config(
     page_title="RAG Benchmark",
-    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # =============================================================================
-# DARK THEME CSS
+# CSS
 # =============================================================================
 
 st.markdown("""
 <style>
-  /* Global dark background */
   .stApp { background-color: #0e0e10; color: #cccccc; }
   section[data-testid="stSidebar"] { background-color: #16161a; border-right: 1px solid #2a2a2e; }
   section[data-testid="stSidebar"] * { color: #aaaaaa !important; }
-
-  /* Main content */
   .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
 
-  /* Tabs */
   .stTabs [data-baseweb="tab-list"] { background-color: #16161a; border-radius: 8px; padding: 4px; gap: 4px; }
   .stTabs [data-baseweb="tab"] { background-color: transparent; color: #666; border-radius: 6px; font-size: 13px; }
   .stTabs [aria-selected="true"] { background-color: #1e1e2e !important; color: #afa9ec !important; }
 
-  /* Cards / containers */
   div[data-testid="stMetric"] { background-color: #16161a; border: 1px solid #2a2a2e; border-radius: 8px; padding: 1rem; }
   div[data-testid="stMetric"] label { color: #666 !important; font-size: 12px !important; }
   div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #afa9ec !important; font-size: 22px !important; }
-  div[data-testid="stMetric"] [data-testid="stMetricDelta"] { font-size: 11px !important; }
 
-  /* Inputs */
   .stTextArea textarea { background-color: #1a1a1f !important; color: #cccccc !important; border: 1px solid #2a2a2e !important; border-radius: 6px !important; font-size: 13px !important; }
-  .stTextInput input { background-color: #1a1a1f !important; color: #cccccc !important; border: 1px solid #2a2a2e !important; }
-  .stSelectbox > div > div { background-color: #1a1a1f !important; border: 1px solid #2a2a2e !important; color: #cccccc !important; }
-  .stSelectbox div[data-baseweb="select"] span { color: #cccccc !important; }
 
-  /* Buttons */
   .stButton > button {
     background-color: #7f77dd22;
     border: 1px solid #7f77dd66;
     color: #afa9ec;
     border-radius: 6px;
     font-size: 13px;
-    padding: 0.4rem 1.2rem;
+    padding: 0.4rem 1rem;
+    width: 100%;
   }
   .stButton > button:hover { background-color: #7f77dd44; border-color: #afa9ec; color: #ffffff; }
 
-  /* Dataframe */
-  .stDataFrame { border: 1px solid #2a2a2e; border-radius: 8px; }
+  /* Sample question pills */
+  .pill-btn > button {
+    background-color: #1a1a1f !important;
+    border: 1px solid #2a2a2e !important;
+    color: #666 !important;
+    border-radius: 20px !important;
+    font-size: 11px !important;
+    padding: 3px 12px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pill-btn > button:hover { border-color: #7f77dd66 !important; color: #afa9ec !important; }
 
-  /* Expander */
+  .stDataFrame { border: 1px solid #2a2a2e; border-radius: 8px; }
   .streamlit-expanderHeader { background-color: #16161a !important; color: #888 !important; border: 1px solid #2a2a2e !important; border-radius: 6px !important; }
   .streamlit-expanderContent { background-color: #1a1a1f !important; border: 1px solid #2a2a2e !important; }
-
-  /* Divider */
   hr { border-color: #2a2a2e !important; }
+  h1, h2, h3 { color: #cccccc !important; font-weight: 500 !important; }
+  h1 { font-size: 20px !important; }
+  h2 { font-size: 16px !important; }
+  h3 { font-size: 14px !important; }
 
-  /* Headings */
-  h1, h2, h3 { color: #cccccc !important; }
-  h1 { font-size: 20px !important; font-weight: 500 !important; }
-  h2 { font-size: 16px !important; font-weight: 500 !important; }
-  h3 { font-size: 14px !important; font-weight: 500 !important; }
-
-  /* Section labels */
-  .section-label {
-    font-size: 10px;
-    color: #555;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    margin-bottom: 8px;
-    font-family: monospace;
-  }
-
-  /* Strategy badges */
-  .badge {
-    display: inline-block;
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-family: monospace;
-    font-weight: 500;
-  }
+  .badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 4px; font-family: monospace; font-weight: 500; }
   .badge-naive    { background: #1d9e7522; color: #5dcaa5; border: 1px solid #1d9e7544; }
   .badge-hybrid   { background: #7f77dd22; color: #afa9ec; border: 1px solid #7f77dd44; }
   .badge-hyde     { background: #ba751722; color: #ef9f27; border: 1px solid #ba751744; }
   .badge-reranked { background: #d85a3022; color: #f0997b; border: 1px solid #d85a3044; }
 
-  /* Result card */
-  .result-card {
-    background: #16161a;
-    border: 1px solid #2a2a2e;
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin-bottom: 10px;
-  }
+  .result-card { background: #16161a; border: 1px solid #2a2a2e; border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; }
+  .result-best { border-left: 3px solid #7f77dd; }
   .result-answer { font-size: 13px; color: #aaaaaa; line-height: 1.7; margin: 8px 0; }
   .result-meta { font-size: 11px; color: #555; font-family: monospace; }
-  .result-best { border-left: 3px solid #7f77dd; }
 
-  /* Confidence bar */
-  .conf-wrap { margin: 8px 0 4px; }
   .conf-label { display: flex; justify-content: space-between; font-size: 10px; color: #555; font-family: monospace; margin-bottom: 3px; }
 
-  /* Info box */
-  .info-box {
-    background: #1d9e7511;
-    border: 1px solid #1d9e7533;
-    border-radius: 6px;
-    padding: 10px 14px;
-    font-size: 12px;
-    color: #5dcaa5;
-    font-family: monospace;
-    margin-bottom: 12px;
-  }
-  .warn-box {
-    background: #ba751711;
-    border: 1px solid #ba751733;
-    border-radius: 6px;
-    padding: 10px 14px;
-    font-size: 12px;
-    color: #ef9f27;
-    font-family: monospace;
-    margin-bottom: 12px;
-  }
-  .err-box {
-    background: #a32d2d11;
-    border: 1px solid #a32d2d33;
-    border-radius: 6px;
-    padding: 10px 14px;
-    font-size: 12px;
-    color: #f09595;
-    font-family: monospace;
-    margin-bottom: 12px;
-  }
+  .info-box { background: #1d9e7511; border: 1px solid #1d9e7533; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #5dcaa5; font-family: monospace; margin-bottom: 12px; }
+  .warn-box { background: #ba751711; border: 1px solid #ba751733; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #ef9f27; font-family: monospace; margin-bottom: 12px; }
+  .err-box  { background: #a32d2d11; border: 1px solid #a32d2d33; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #f09595; font-family: monospace; margin-bottom: 12px; }
 
-  /* Chunk box */
-  .chunk-box {
-    background: #1a1a1f;
-    border: 1px solid #2a2a2e;
-    border-radius: 6px;
-    padding: 10px 12px;
-    margin-bottom: 6px;
-    font-size: 11px;
-  }
+  .chunk-box { background: #1a1a1f; border: 1px solid #2a2a2e; border-radius: 6px; padding: 10px 12px; margin-bottom: 6px; font-size: 11px; }
   .chunk-source { color: #7f77dd; font-family: monospace; font-size: 10px; margin-bottom: 4px; }
   .chunk-score  { color: #555; font-family: monospace; font-size: 10px; }
   .chunk-text   { color: #888; line-height: 1.6; }
 
-  /* Plotly charts dark */
-  .js-plotly-plot .plotly { background: transparent !important; }
+  .about-card { background: #16161a; border: 1px solid #2a2a2e; border-radius: 8px; padding: 18px; margin-bottom: 10px; }
+  .about-heading { font-size: 10px; color: #7f77dd; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px; font-family: monospace; }
+  .about-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 0.5px solid #1e1e22; font-size: 12px; font-family: monospace; }
+  .about-row:last-child { border-bottom: none; }
+  .about-key { color: #555; }
+  .about-val { color: #aaa; }
+  .about-highlight { color: #afa9ec !important; font-weight: 500; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+  .stat-box { background: #1a1a1f; border-radius: 6px; padding: 10px 12px; }
+  .stat-num { font-size: 20px; font-weight: 500; color: #afa9ec; font-family: monospace; }
+  .stat-label { font-size: 10px; color: #555; margin-top: 2px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -188,25 +137,10 @@ def api_health():
         return None
 
 
-def api_query(question: str, strategy: str, top_k: int = 5):
+def api_benchmark(question, top_k=5):
     try:
-        r = requests.post(
-            f"{API_BASE}/query",
-            json={"question": question, "strategy": strategy, "top_k": top_k},
-            timeout=30,
-        )
-        return r.json() if r.status_code == 200 else {"error": r.text}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def api_benchmark(question: str, top_k: int = 5):
-    try:
-        r = requests.post(
-            f"{API_BASE}/benchmark",
-            json={"question": question, "top_k": top_k},
-            timeout=60,
-        )
+        r = requests.post(f"{API_BASE}/benchmark",
+            json={"question": question, "top_k": top_k}, timeout=60)
         return r.json() if r.status_code == 200 else {"error": r.text}
     except Exception as e:
         return {"error": str(e)}
@@ -220,9 +154,23 @@ def load_csv():
     if not csvs:
         return None
     df = pd.read_csv(csvs[-1])
-    df["confidence"]     = pd.to_numeric(df["confidence"], errors="coerce")
-    df["total_latency"]  = pd.to_numeric(df["total_latency"], errors="coerce")
-    df["tier"]           = pd.to_numeric(df["tier"], errors="coerce")
+    df["confidence"]    = pd.to_numeric(df["confidence"], errors="coerce")
+    df["total_latency"] = pd.to_numeric(df["total_latency"], errors="coerce")
+    df["tier"]          = pd.to_numeric(df["tier"], errors="coerce")
+    return df
+
+
+def load_judge_csv():
+    results_dir = Path("results")
+    if not results_dir.exists():
+        return None
+    csvs = sorted(results_dir.glob("judge_*.csv"))
+    if not csvs:
+        return None
+    df = pd.read_csv(csvs[-1])
+    for col in ["faithfulness", "relevance", "hallucination_free", "abstention_correct", "judge_score"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["tier"] = pd.to_numeric(df["tier"], errors="coerce")
     return df
 
 
@@ -234,52 +182,58 @@ def load_golden():
     return data.get("questions", data) if isinstance(data, dict) else data
 
 
-def make_bar_chart(df_plot, x_col, y_col, color_map, title, x_label="%"):
+def safe_avg(series):
+    vals = series.dropna()
+    return round(float(vals.mean()), 3) if len(vals) > 0 else 0.0
+
+
+def horizontal_bar(data_dict, title, x_max=None, x_suffix="", height=220):
+    """data_dict: {strategy: value}"""
     fig = go.Figure()
-    for _, row in df_plot.iterrows():
+    for strategy, value in data_dict.items():
         fig.add_trace(go.Bar(
-            x=[row[x_col]],
-            y=[row[y_col]],
-            name=row[y_col],
-            marker_color=color_map.get(row[y_col], "#888"),
+            y=[strategy],
+            x=[value],
             orientation="h",
+            marker_color=STRATEGY_COLORS.get(strategy, "#888"),
             showlegend=False,
+            text=[f'{value}{x_suffix}'],
+            textposition="outside",
+            textfont=dict(size=11, color="#aaa"),
         ))
-    fig.update_layout(
+    layout = dict(
         plot_bgcolor="#16161a",
         paper_bgcolor="#16161a",
-        font=dict(color="#888", size=11),
-        margin=dict(l=0, r=0, t=28, b=0),
-        height=160,
-        title=dict(text=title, font=dict(size=11, color="#555"), x=0),
-        xaxis=dict(
-            showgrid=False,
-            zeroline=False,
-            tickfont=dict(size=10),
-            title=x_label,
-        ),
-        yaxis=dict(
-            showgrid=False,
-            tickfont=dict(size=11),
-        ),
-        barmode="overlay",
+        font=dict(color="#888", size=12),
+        margin=dict(l=10, r=50, t=36, b=10),
+        height=height,
+        title=dict(text=title, font=dict(size=12, color="#666"), x=0),
+        xaxis=dict(showgrid=False, zeroline=False, ticksuffix=x_suffix),
+        yaxis=dict(showgrid=False, tickfont=dict(size=12)),
+        barmode="group",
     )
+    if x_max:
+        layout["xaxis"]["range"] = [0, x_max]
+    fig.update_layout(**layout)
     return fig
 
 
-def conf_bar_html(confidence: float, strategy: str) -> str:
+def conf_bar_html(confidence, strategy):
     color = STRATEGY_COLORS.get(strategy, "#888")
     pct = int(confidence * 100)
     return f"""
-    <div class="conf-wrap">
-      <div class="conf-label"><span>confidence</span><span style="color:{color}">{confidence:.2f}</span></div>
+    <div style="margin:8px 0 4px;">
+      <div class="conf-label">
+        <span>confidence</span>
+        <span style="color:{color}">{confidence:.2f}</span>
+      </div>
       <div style="background:#222;border-radius:3px;height:5px;">
         <div style="width:{pct}%;background:{color};height:5px;border-radius:3px;"></div>
       </div>
     </div>"""
 
 
-def strategy_badge(name: str) -> str:
+def strategy_badge(name):
     return f'<span class="badge badge-{name}">{name}</span>'
 
 
@@ -288,37 +242,45 @@ def strategy_badge(name: str) -> str:
 # =============================================================================
 
 with st.sidebar:
-    st.markdown('<div style="font-size:16px;font-weight:500;color:#7f77dd;margin-bottom:4px;">RAG Benchmark</div>', unsafe_allow_html=True)
-    st.markdown('<div style="font-size:11px;color:#444;font-family:monospace;margin-bottom:20px;">multi-strategy evaluation</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:16px;font-weight:500;color:#7f77dd;margin-bottom:2px;">RAG Benchmark</div>'
+        '<div style="font-size:10px;color:#444;font-family:monospace;margin-bottom:16px;letter-spacing:1px;">MULTI-STRATEGY EVALUATION</div>',
+        unsafe_allow_html=True
+    )
 
     health = api_health()
     if health:
-        st.markdown('<div class="info-box">API online</div>', unsafe_allow_html=True)
+        st.markdown('<div class="info-box"> API online</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div class="warn-box">API offline — start uvicorn</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box"> API offline</div>', unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown('<div class="section-label">Corpus</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div style="font-size:11px;color:#555;font-family:monospace;line-height:2;">
-    Chunks &nbsp;&nbsp; 30,432<br>
-    BM25 &nbsp;&nbsp;&nbsp;&nbsp; 7,123<br>
-    Docs &nbsp;&nbsp;&nbsp;&nbsp; 219<br>
-    Dims &nbsp;&nbsp;&nbsp;&nbsp; 384
-    </div>""", unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown('<div class="section-label">Strategies</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;font-family:monospace;">Strategies</div>', unsafe_allow_html=True)
+    descriptions = {
+        "naive":    "vector search only",
+        "hybrid":   "BM25 + vector + RRF",
+        "hyde":     "hypothetical embeddings",
+        "reranked": "cross-encoder rerank",
+    }
     for s, color in STRATEGY_COLORS.items():
         st.markdown(
-            f'<div style="font-size:11px;font-family:monospace;padding:3px 0;">'
-            f'<span style="color:{color};">■</span> {s}</div>',
+            f'<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">'
+            f'<span style="color:{color};font-size:14px;">■</span>'
+            f'<div><div style="font-size:12px;color:#aaa;font-family:monospace;">{s}</div>'
+            f'<div style="font-size:10px;color:#444;">{descriptions[s]}</div></div>'
+            f'</div>',
             unsafe_allow_html=True
         )
 
     st.markdown("---")
-    st.markdown('<div class="section-label">Top K</div>', unsafe_allow_html=True)
-    top_k = st.slider("", min_value=3, max_value=10, value=5, label_visibility="collapsed")
+    st.markdown('<div style="font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;font-family:monospace;">Corpus</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="font-size:11px;color:#555;font-family:monospace;line-height:2;">
+    chunks &nbsp;&nbsp; 30,432<br>
+    bm25 &nbsp;&nbsp;&nbsp;&nbsp; 7,123<br>
+    docs &nbsp;&nbsp;&nbsp;&nbsp; 219<br>
+    dims &nbsp;&nbsp;&nbsp;&nbsp; 384
+    </div>""", unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -336,156 +298,95 @@ tab_query, tab_benchmark, tab_sources, tab_about = st.tabs([
 
 with tab_query:
     st.markdown("### Ask a question")
+    st.markdown(
+        '<div style="font-size:11px;color:#555;font-family:monospace;margin-bottom:12px;">'
+        'Runs all 4 strategies in parallel — asyncio.gather — wall time = slowest single strategy'
+        '</div>',
+        unsafe_allow_html=True
+    )
 
     question = st.text_area(
         "",
-        placeholder="What is LoRA and how does it reduce trainable parameters?",
-        height=80,
+        placeholder="e.g. What is LoRA and how does it reduce trainable parameters?",
+        height=90,
         label_visibility="collapsed",
         key="query_input"
     )
 
-    col_mode, col_strat, col_run = st.columns([2, 2, 1])
-    with col_mode:
-        mode = st.selectbox(
-            "Mode",
-            ["All 4 strategies (parallel)", "Single strategy"],
-            label_visibility="collapsed"
-        )
-    with col_strat:
-        single_strategy = st.selectbox(
-            "Strategy",
-            ["naive", "hybrid", "hyde", "reranked"],
-            label_visibility="collapsed",
-            disabled=(mode == "All 4 strategies (parallel)")
-        )
-    with col_run:
-        run_clicked = st.button("Run", use_container_width=True)
+    run_clicked = st.button("Run all 4 strategies", use_container_width=True)
 
     if run_clicked and question.strip():
         if not health:
-            st.markdown('<div class="err-box">API is offline. Run: uvicorn app.main:app --reload</div>', unsafe_allow_html=True)
+            st.markdown('<div class="err-box">API offline — run: uvicorn app.main:app --reload</div>', unsafe_allow_html=True)
         else:
-            if mode == "All 4 strategies (parallel)":
-                with st.spinner("Running all 4 strategies in parallel..."):
-                    result = api_benchmark(question.strip(), top_k)
+            with st.spinner("Running all 4 strategies in parallel..."):
+                result = api_benchmark(question.strip())
 
-                if "error" in result:
-                    st.markdown(f'<div class="err-box">Error: {result["error"]}</div>', unsafe_allow_html=True)
-                else:
-                    # Summary row
-                    c1, c2, c3, c4 = st.columns(4)
-                    strategies_data = result.get("strategies", [])
-                    answered = sum(1 for s in strategies_data if s.get("is_answerable"))
-
-                    c1.metric("Best strategy",    result.get("best_strategy", "—").upper())
-                    c2.metric("Fastest",          result.get("fastest_strategy", "—").upper())
-                    c3.metric("Wall time",        f'{result.get("total_time", 0):.1f}s')
-                    c4.metric("Answerable",       f"{answered}/4")
-
-                    st.markdown("")
-
-                    # Sort: best first, then by confidence
-                    best = result.get("best_strategy")
-                    sorted_strategies = sorted(
-                        strategies_data,
-                        key=lambda x: (x["strategy"] != best, -x.get("confidence", 0))
-                    )
-
-                    for s in sorted_strategies:
-                        is_best = s["strategy"] == best
-                        card_class = "result-card result-best" if is_best else "result-card"
-                        badge = strategy_badge(s["strategy"])
-                        best_tag = ' <span style="font-size:10px;color:#7f77dd;font-family:monospace;">★ best</span>' if is_best else ""
-                        lat = s.get("latency", {})
-                        lat_str = (
-                            f'retrieve {lat.get("retrieve", 0):.2f}s &nbsp;|&nbsp; '
-                            f'generate {lat.get("generate", 0):.2f}s &nbsp;|&nbsp; '
-                            f'total {lat.get("total", 0):.2f}s'
-                        )
-                        conf_html = conf_bar_html(s.get("confidence", 0), s["strategy"])
-                        answer_text = s.get("answer", "")[:400]
-
-                        answerable_tag = (
-                            '<span style="color:#5dcaa5;font-size:10px;">answerable</span>'
-                            if s.get("is_answerable")
-                            else '<span style="color:#f09595;font-size:10px;">abstained</span>'
-                        )
-
-                        st.markdown(f"""
-                        <div class="{card_class}">
-                          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                            {badge}{best_tag}
-                            {answerable_tag}
-                          </div>
-                          <div class="result-answer">{answer_text}</div>
-                          {conf_html}
-                          <div class="result-meta" style="margin-top:8px;">{lat_str}</div>
-                        </div>""", unsafe_allow_html=True)
-
-                        # Show chunks if available
-                        chunks = s.get("retrieved_chunks", [])
-                        if chunks:
-                            with st.expander(f"Retrieved chunks ({len(chunks)})", expanded=False):
-                                for i, chunk in enumerate(chunks, 1):
-                                    src = chunk.get("metadata", {}).get("filename", "unknown")
-                                    score = chunk.get("score", 0)
-                                    text = chunk.get("content", "")[:300]
-                                    st.markdown(f"""
-                                    <div class="chunk-box">
-                                      <div class="chunk-source">{i}. {src}</div>
-                                      <div class="chunk-score">score: {score:.4f}</div>
-                                      <div class="chunk-text">{text}...</div>
-                                    </div>""", unsafe_allow_html=True)
-
+            if "error" in result:
+                st.markdown(f'<div class="err-box">Error: {result["error"]}</div>', unsafe_allow_html=True)
             else:
-                # Single strategy
-                with st.spinner(f"Running {single_strategy}..."):
-                    result = api_query(question.strip(), single_strategy, top_k)
+                strategies_data = result.get("strategies", [])
+                answered = sum(1 for s in strategies_data if s.get("is_answerable"))
 
-                if "error" in result:
-                    st.markdown(f'<div class="err-box">Error: {result["error"]}</div>', unsafe_allow_html=True)
-                else:
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Strategy",    single_strategy.upper())
-                    c2.metric("Confidence",  f'{result.get("confidence", 0):.2f}')
-                    c3.metric("Latency",     f'{result.get("latency", {}).get("total", 0):.2f}s')
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Best strategy",  result.get("best_strategy", "—").upper())
+                c2.metric("Fastest",        result.get("fastest_strategy", "—").upper())
+                c3.metric("Wall time",      f'{result.get("total_time", 0):.1f}s')
+                c4.metric("Answerable",     f"{answered} / 4")
 
-                    is_ans = result.get("is_answerable", False)
-                    ans_html = (
-                        '<span style="color:#5dcaa5;font-size:10px;font-family:monospace;">answerable</span>'
-                        if is_ans else
-                        '<span style="color:#f09595;font-size:10px;font-family:monospace;">abstained</span>'
+                st.markdown("")
+
+                best = result.get("best_strategy")
+                sorted_strategies = sorted(
+                    strategies_data,
+                    key=lambda x: (x["strategy"] != best, -x.get("confidence", 0))
+                )
+
+                for s in sorted_strategies:
+                    is_best    = s["strategy"] == best
+                    card_class = "result-card result-best" if is_best else "result-card"
+                    badge      = strategy_badge(s["strategy"])
+                    best_tag   = ' <span style="font-size:10px;color:#7f77dd;font-family:monospace;">★ best</span>' if is_best else ""
+                    lat        = s.get("latency", {})
+                    lat_str    = (
+                        f'retrieve {lat.get("retrieve",0):.2f}s &nbsp;|&nbsp; '
+                        f'generate {lat.get("generate",0):.2f}s &nbsp;|&nbsp; '
+                        f'total {lat.get("total",0):.2f}s'
                     )
-
-                    conf_html = conf_bar_html(result.get("confidence", 0), single_strategy)
-                    badge = strategy_badge(single_strategy)
-                    lat = result.get("latency", {})
+                    raw_answer = s.get("answer", "")
+                    is_error = raw_answer.startswith("ERROR")
+                    answer_text = (
+                        '<span style="color:#f09595;font-size:12px;">Rate limit hit — try again tomorrow 5:30am IST</span>'
+                        if is_error else
+                        raw_answer[:400]
+                    )
+                    answerable_tag = (
+                        '<span style="color:#f09595;font-size:10px;">rate limited</span>'
+                        if is_error else
+                        '<span style="color:#5dcaa5;font-size:10px;">answerable</span>'
+                        if s.get("is_answerable") else
+                        '<span style="color:#666;font-size:10px;">abstained</span>'
+                    )
+                    conf_html = conf_bar_html(s.get("confidence", 0), s["strategy"])
 
                     st.markdown(f"""
-                    <div class="result-card">
+                    <div class="{card_class}">
                       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                        {badge} {ans_html}
+                        <div>{badge}{best_tag}</div>
+                        {answerable_tag}
                       </div>
-                      <div class="result-answer">{result.get("answer", "")}</div>
-                      <div style="font-size:11px;color:#666;font-family:monospace;margin:8px 0 4px;">
-                        reasoning: {result.get("reasoning", "")[:200]}
-                      </div>
+                      <div class="result-answer">{answer_text}</div>
                       {conf_html}
-                      <div class="result-meta" style="margin-top:8px;">
-                        retrieve {lat.get("retrieve",0):.2f}s &nbsp;|&nbsp;
-                        generate {lat.get("generate",0):.2f}s &nbsp;|&nbsp;
-                        total {lat.get("total",0):.2f}s
-                      </div>
+                      <div class="result-meta" style="margin-top:8px;">{lat_str}</div>
                     </div>""", unsafe_allow_html=True)
 
-                    chunks = result.get("retrieved_chunks", [])
+                    chunks = s.get("retrieved_chunks", [])
                     if chunks:
-                        with st.expander(f"Retrieved chunks ({len(chunks)})", expanded=False):
+                        with st.expander(f"Retrieved chunks — {s['strategy']} ({len(chunks)})", expanded=False):
                             for i, chunk in enumerate(chunks, 1):
-                                src = chunk.get("metadata", {}).get("filename", "unknown")
+                                src   = chunk.get("metadata", {}).get("filename", "unknown")
                                 score = chunk.get("score", 0)
-                                text = chunk.get("content", "")[:300]
+                                text  = chunk.get("content", "")[:300]
                                 st.markdown(f"""
                                 <div class="chunk-box">
                                   <div class="chunk-source">{i}. {src}</div>
@@ -504,216 +405,164 @@ with tab_query:
 with tab_benchmark:
     st.markdown("### Benchmark results")
 
-    df = load_csv()
+    df    = load_csv()
+    df_judge = load_judge_csv()
+
     if df is None:
-        st.markdown('<div class="warn-box">No benchmark CSV found in results/ — run scripts_main/run_benchmark.py first</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box">No benchmark CSV in results/ — run scripts_main/run_benchmark.py</div>', unsafe_allow_html=True)
     else:
-        df_clean = df[~df["answer"].str.contains("ERROR", na=False)]
-        total_q = df_clean["question_id"].nunique()
-        strategies_found = df_clean["strategy"].unique().tolist()
+        df_clean   = df[~df["answer"].str.contains("ERROR", na=False)]
+        total_q    = df_clean["question_id"].nunique()
+        golden     = load_golden()
+        golden_map = {q["id"]: q for q in golden} if golden else {}
 
-        st.markdown(f'<div class="info-box">Loaded {len(df_clean)} rows — {total_q}/30 questions — {len(strategies_found)} strategies</div>', unsafe_allow_html=True)
-
-        # Per-strategy metrics
-        metrics = []
+        # Compute metrics
+        metrics = {}
         for s in ["naive", "hybrid", "hyde", "reranked"]:
             sub = df_clean[df_clean["strategy"] == s]
             if len(sub) == 0:
                 continue
-            golden = load_golden()
-            golden_map = {q["id"]: q for q in golden} if golden else {}
-
-            term_hits = []
-            abstention = []
-            calibration = []
+            abstention, calibration = [], []
             for _, row in sub.iterrows():
-                qid = row["question_id"]
-                g = golden_map.get(qid, {})
-                terms = g.get("expected_retrieval", {}).get("must_contain_terms", [])
-                if terms:
-                    answer_lower = str(row["answer"]).lower()
-                    hit = sum(1 for t in terms if t.lower() in answer_lower)
-                    term_hits.append(hit / len(terms))
-
+                g       = golden_map.get(row["question_id"], {})
                 exp_ans = g.get("is_answerable", True)
                 act_ans = str(row.get("is_answerable", "false")).lower() == "true"
+                conf    = float(row["confidence"])
                 abstention.append(1.0 if act_ans == exp_ans else 0.0)
-
-                conf = float(row["confidence"])
                 if exp_ans:
-                    exp_min = g.get("expected_confidence_min", 0.7)
-                    calibration.append(1.0 if conf >= exp_min else 0.0)
+                    calibration.append(1.0 if conf >= g.get("expected_confidence_min", 0.7) else 0.0)
                 else:
-                    exp_max = g.get("expected_confidence_max", 0.3)
-                    calibration.append(1.0 if conf <= exp_max else 0.0)
+                    calibration.append(1.0 if conf <= g.get("expected_confidence_max", 0.3) else 0.0)
 
-            metrics.append({
-                "strategy":    s,
-                "term_hit":    round(sum(term_hits) / len(term_hits) * 100, 1) if term_hits else 0,
+            metrics[s] = {
                 "abstention":  round(sum(abstention) / len(abstention) * 100, 1) if abstention else 0,
                 "calibration": round(sum(calibration) / len(calibration) * 100, 1) if calibration else 0,
-                "avg_conf":    round(sub["confidence"].mean(), 2),
-                "avg_latency": round(sub["total_latency"].mean(), 2),
+                "avg_latency": round(float(sub["total_latency"].mean()), 2),
+                "avg_conf":    round(float(sub["confidence"].mean()), 2),
                 "answered":    int((sub["is_answerable"].astype(str).str.lower() == "true").sum()),
                 "total":       len(sub),
-            })
+            }
+
+        judge_metrics = {}
+        if df_judge is not None:
+            for s in ["naive", "hybrid", "hyde", "reranked"]:
+                sub = df_judge[df_judge["strategy"] == s].dropna(subset=["judge_score"])
+                if len(sub) == 0:
+                    continue
+                judge_metrics[s] = {
+                    "judge_score":        safe_avg(sub["judge_score"]),
+                    "faithfulness":       safe_avg(sub["faithfulness"]),
+                    "hallucination_free": safe_avg(sub["hallucination_free"]),
+                    "abstention_correct": safe_avg(sub["abstention_correct"]),
+                }
 
         if metrics:
-            # Top summary cards
-            best_cal  = max(metrics, key=lambda x: x["calibration"])
-            best_abs  = max(metrics, key=lambda x: x["abstention"])
-            best_fast = min(metrics, key=lambda x: x["avg_latency"])
+            best_abs   = max(metrics, key=lambda s: metrics[s]["abstention"])
+            best_cal   = max(metrics, key=lambda s: metrics[s]["calibration"])
+            best_fast  = min(metrics, key=lambda s: metrics[s]["avg_latency"])
+            best_judge = max(judge_metrics, key=lambda s: judge_metrics[s]["judge_score"]) if judge_metrics else "—"
 
+            # Summary cards
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Best calibration",  best_cal["strategy"].upper(),  f'{best_cal["calibration"]}%')
-            c2.metric("Best abstention",   best_abs["strategy"].upper(),  f'{best_abs["abstention"]}%')
-            c3.metric("Fastest",           best_fast["strategy"].upper(), f'{best_fast["avg_latency"]}s')
-            c4.metric("Questions done",    f"{total_q}/30")
+            c1.metric("Best abstention",  best_abs.upper(),  f'{metrics[best_abs]["abstention"]}%')
+            c2.metric("Best calibration", best_cal.upper(),  f'{metrics[best_cal]["calibration"]}%')
+            c3.metric("Fastest",          best_fast.upper(), f'{metrics[best_fast]["avg_latency"]}s')
+            c4.metric("Best judge score", best_judge.upper() if best_judge != "—" else "—",
+                      f'{judge_metrics[best_judge]["judge_score"]:.3f}' if judge_metrics else "—")
 
             st.markdown("")
 
-            # Charts row
-            col_l, col_r = st.columns(2)
+            # 4 big charts in 2x2 grid
+            col1, col2 = st.columns(2)
 
-            with col_l:
-                df_m = pd.DataFrame(metrics)
-
-                fig_abs = go.Figure()
-                for _, row in df_m.iterrows():
-                    fig_abs.add_trace(go.Bar(
-                        y=[row["strategy"]],
-                        x=[row["abstention"]],
-                        orientation="h",
-                        marker_color=STRATEGY_COLORS.get(row["strategy"], "#888"),
-                        showlegend=False,
-                        text=[f'{row["abstention"]}%'],
-                        textposition="outside",
-                        textfont=dict(size=10, color="#888"),
-                    ))
-                fig_abs.update_layout(
-                    plot_bgcolor="#16161a", paper_bgcolor="#16161a",
-                    font=dict(color="#888", size=11),
-                    margin=dict(l=0, r=30, t=28, b=0),
-                    height=180,
-                    title=dict(text="Abstention accuracy", font=dict(size=11, color="#555"), x=0),
-                    xaxis=dict(showgrid=False, zeroline=False, range=[0, 110], ticksuffix="%"),
-                    yaxis=dict(showgrid=False),
-                    barmode="group",
+            with col1:
+                st.plotly_chart(
+                    horizontal_bar(
+                        {s: metrics[s]["abstention"] for s in metrics},
+                        "Abstention accuracy — knows when NOT to answer",
+                        x_max=110, x_suffix="%", height=250
+                    ),
+                    use_container_width=True
                 )
-                st.plotly_chart(fig_abs, use_container_width=True)
 
-                fig_lat = go.Figure()
-                for _, row in df_m.iterrows():
-                    fig_lat.add_trace(go.Bar(
-                        y=[row["strategy"]],
-                        x=[row["avg_latency"]],
-                        orientation="h",
-                        marker_color=STRATEGY_COLORS.get(row["strategy"], "#888"),
-                        showlegend=False,
-                        text=[f'{row["avg_latency"]}s'],
-                        textposition="outside",
-                        textfont=dict(size=10, color="#888"),
-                    ))
-                fig_lat.update_layout(
-                    plot_bgcolor="#16161a", paper_bgcolor="#16161a",
-                    font=dict(color="#888", size=11),
-                    margin=dict(l=0, r=40, t=28, b=0),
-                    height=180,
-                    title=dict(text="Avg latency (s)", font=dict(size=11, color="#555"), x=0),
-                    xaxis=dict(showgrid=False, zeroline=False, ticksuffix="s"),
-                    yaxis=dict(showgrid=False),
+            with col2:
+                st.plotly_chart(
+                    horizontal_bar(
+                        {s: metrics[s]["calibration"] for s in metrics},
+                        "Confidence calibration — honest confidence scores",
+                        x_max=110, x_suffix="%", height=250
+                    ),
+                    use_container_width=True
                 )
-                st.plotly_chart(fig_lat, use_container_width=True)
 
-            with col_r:
-                fig_cal = go.Figure()
-                for _, row in df_m.iterrows():
-                    fig_cal.add_trace(go.Bar(
-                        y=[row["strategy"]],
-                        x=[row["calibration"]],
-                        orientation="h",
-                        marker_color=STRATEGY_COLORS.get(row["strategy"], "#888"),
-                        showlegend=False,
-                        text=[f'{row["calibration"]}%'],
-                        textposition="outside",
-                        textfont=dict(size=10, color="#888"),
-                    ))
-                fig_cal.update_layout(
-                    plot_bgcolor="#16161a", paper_bgcolor="#16161a",
-                    font=dict(color="#888", size=11),
-                    margin=dict(l=0, r=30, t=28, b=0),
-                    height=180,
-                    title=dict(text="Confidence calibration", font=dict(size=11, color="#555"), x=0),
-                    xaxis=dict(showgrid=False, zeroline=False, range=[0, 110], ticksuffix="%"),
-                    yaxis=dict(showgrid=False),
-                )
-                st.plotly_chart(fig_cal, use_container_width=True)
+            col3, col4 = st.columns(2)
 
-                fig_conf = go.Figure()
-                for _, row in df_m.iterrows():
-                    fig_conf.add_trace(go.Bar(
-                        y=[row["strategy"]],
-                        x=[row["avg_conf"]],
-                        orientation="h",
-                        marker_color=STRATEGY_COLORS.get(row["strategy"], "#888"),
-                        showlegend=False,
-                        text=[f'{row["avg_conf"]}'],
-                        textposition="outside",
-                        textfont=dict(size=10, color="#888"),
-                    ))
-                fig_conf.update_layout(
-                    plot_bgcolor="#16161a", paper_bgcolor="#16161a",
-                    font=dict(color="#888", size=11),
-                    margin=dict(l=0, r=40, t=28, b=0),
-                    height=180,
-                    title=dict(text="Avg confidence", font=dict(size=11, color="#555"), x=0),
-                    xaxis=dict(showgrid=False, zeroline=False, range=[0, 1.2]),
-                    yaxis=dict(showgrid=False),
-                )
-                st.plotly_chart(fig_conf, use_container_width=True)
+            with col3:
+                if judge_metrics:
+                    st.plotly_chart(
+                        horizontal_bar(
+                            {s: judge_metrics[s]["judge_score"] for s in judge_metrics},
+                            "LLM judge — overall answer quality",
+                            x_max=1.1, height=250
+                        ),
+                        use_container_width=True
+                    )
+                else:
+                    st.plotly_chart(
+                        horizontal_bar(
+                            {s: metrics[s]["avg_conf"] for s in metrics},
+                            "Average confidence score",
+                            x_max=1.1, height=250
+                        ),
+                        use_container_width=True
+                    )
 
-            # Confidence by tier scatter
-            st.markdown("---")
-            st.markdown("#### Confidence by tier and strategy")
-            fig_scatter = px.strip(
-                df_clean,
-                x="strategy", y="confidence",
-                color="strategy",
-                color_discrete_map=STRATEGY_COLORS,
-                facet_col="tier",
-                stripmode="overlay",
-                labels={"confidence": "Confidence", "strategy": ""},
-            )
-            fig_scatter.update_layout(
-                plot_bgcolor="#16161a", paper_bgcolor="#16161a",
-                font=dict(color="#888", size=11),
-                margin=dict(l=0, r=0, t=40, b=0),
-                height=240,
-                showlegend=False,
-            )
-            fig_scatter.update_xaxes(showgrid=False)
-            fig_scatter.update_yaxes(showgrid=False, range=[0, 1.1])
-            st.plotly_chart(fig_scatter, use_container_width=True)
+            with col4:
+                if judge_metrics:
+                    st.plotly_chart(
+                        horizontal_bar(
+                            {s: judge_metrics[s]["hallucination_free"] for s in judge_metrics},
+                            "Hallucination free — 1.0 = clean, 0.0 = fabricated",
+                            x_max=1.1, height=250
+                        ),
+                        use_container_width=True
+                    )
+                else:
+                    st.plotly_chart(
+                        horizontal_bar(
+                            {s: metrics[s]["avg_latency"] for s in metrics},
+                            "Average latency (seconds)",
+                            x_suffix="s", height=250
+                        ),
+                        use_container_width=True
+                    )
 
-            # Raw data table
+            # Raw table
             st.markdown("---")
             st.markdown("#### Raw results")
-            tier_filter = st.selectbox(
-                "Filter by tier",
-                ["All", "Tier 1 (easy)", "Tier 2 (multi-chunk)", "Tier 3 (adversarial)"],
-                key="tier_filter"
-            )
-            tier_map = {
-                "Tier 1 (easy)": 1,
-                "Tier 2 (multi-chunk)": 2,
-                "Tier 3 (adversarial)": 3
-            }
-            display_df = df_clean.copy()
-            if tier_filter != "All":
-                display_df = display_df[display_df["tier"] == tier_map[tier_filter]]
 
-            show_cols = ["question_id", "tier", "strategy", "confidence",
-                         "is_answerable", "total_latency"]
+            col_filter, col_strat_filter = st.columns(2)
+            with col_filter:
+                tier_filter = st.selectbox(
+                    "Filter by tier",
+                    ["All tiers", "Tier 1 — easy", "Tier 2 — multi-chunk", "Tier 3 — adversarial"],
+                    label_visibility="collapsed"
+                )
+            with col_strat_filter:
+                strat_filter = st.selectbox(
+                    "Filter by strategy",
+                    ["All strategies", "naive", "hybrid", "hyde", "reranked"],
+                    label_visibility="collapsed"
+                )
+
+            tier_map = {"Tier 1 — easy": 1, "Tier 2 — multi-chunk": 2, "Tier 3 — adversarial": 3}
+            display_df = df_clean.copy()
+            if tier_filter != "All tiers":
+                display_df = display_df[display_df["tier"] == tier_map[tier_filter]]
+            if strat_filter != "All strategies":
+                display_df = display_df[display_df["strategy"] == strat_filter]
+
+            show_cols = ["question_id", "tier", "strategy", "confidence", "is_answerable", "total_latency"]
             if "top_sources" in display_df.columns:
                 show_cols.append("top_sources")
 
@@ -735,33 +584,27 @@ with tab_sources:
     if not golden:
         st.markdown('<div class="warn-box">data/golden_dataset.json not found</div>', unsafe_allow_html=True)
     else:
-        golden_map = {q["id"]: q for q in golden}
-
-        # Corpus group counts
         corpus_groups = {
             "huggingface": 0, "langchain": 0, "anthropic": 0,
             "papers": 0, "beir": 0, "adversarial": 0
         }
-        corpus_colors = {
-            "huggingface": "#5DCAA5",
-            "langchain":   "#7F77DD",
-            "anthropic":   "#EF9F27",
-            "papers":      "#F0997B",
-            "beir":        "#85B7EB",
-            "adversarial": "#555",
+        corpus_colors_map = {
+            "huggingface": "#5DCAA5", "langchain": "#7F77DD",
+            "anthropic":   "#EF9F27", "papers":    "#F0997B",
+            "beir":        "#85B7EB", "adversarial": "#555555",
         }
         for q in golden:
             sources = q.get("source_documents", [])
             placed = False
             for s in sources:
                 sl = s.lower()
-                if any(x in sl for x in ["peft", "transformers", "llm_tutorial", "pipeline", "tokeniz", "training", "perf_train", "generation", "quantization", "bitsandbytes", "deepspeed", "kv_cache"]):
+                if any(x in sl for x in ["peft","transformers","llm_tutorial","pipeline","tokeniz","training","perf_train","generation","quantization","bitsandbytes","deepspeed","kv_cache"]):
                     corpus_groups["huggingface"] += 1; placed = True; break
-                elif any(x in sl for x in ["langchain", "lcel", "agent", "chain", "retriever"]):
+                elif any(x in sl for x in ["langchain","lcel","agent","chain","retriever"]):
                     corpus_groups["langchain"] += 1; placed = True; break
                 elif "anthropic" in sl:
                     corpus_groups["anthropic"] += 1; placed = True; break
-                elif any(x in sl for x in ["paper", "pdf", "lora", "rag", "attention", "selfrag", "hyde"]):
+                elif any(x in sl for x in ["paper","pdf","lora","rag","attention","selfrag","hyde"]):
                     corpus_groups["papers"] += 1; placed = True; break
                 elif "scifact" in sl or "beir" in sl:
                     corpus_groups["beir"] += 1; placed = True; break
@@ -774,17 +617,16 @@ with tab_sources:
             fig_pie = go.Figure(go.Pie(
                 labels=list(corpus_groups.keys()),
                 values=list(corpus_groups.values()),
-                marker_colors=[corpus_colors[k] for k in corpus_groups],
+                marker_colors=[corpus_colors_map[k] for k in corpus_groups],
                 textinfo="label+value",
-                textfont=dict(size=11, color="#aaa"),
+                textfont=dict(size=11),
                 hole=0.5,
                 showlegend=False,
             ))
             fig_pie.update_layout(
                 plot_bgcolor="#16161a", paper_bgcolor="#16161a",
-                margin=dict(l=0, r=0, t=28, b=0),
-                height=240,
-                title=dict(text="Questions per source group", font=dict(size=11, color="#555"), x=0),
+                margin=dict(l=0, r=0, t=36, b=0), height=260,
+                title=dict(text="Questions per source group", font=dict(size=12, color="#666"), x=0),
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
@@ -793,14 +635,12 @@ with tab_sources:
             for q in golden:
                 cat = q.get("category", "unknown")
                 categories[cat] = categories.get(cat, 0) + 1
-
             cats_df = pd.DataFrame(
                 sorted(categories.items(), key=lambda x: x[1], reverse=True),
                 columns=["category", "count"]
             )
             fig_cat = go.Figure(go.Bar(
-                y=cats_df["category"],
-                x=cats_df["count"],
+                y=cats_df["category"], x=cats_df["count"],
                 orientation="h",
                 marker_color="rgba(127,119,221,0.3)",
                 marker_line_color="#7f77dd",
@@ -809,31 +649,29 @@ with tab_sources:
             fig_cat.update_layout(
                 plot_bgcolor="#16161a", paper_bgcolor="#16161a",
                 font=dict(color="#888", size=10),
-                margin=dict(l=0, r=0, t=28, b=0),
-                height=240,
-                title=dict(text="Question categories", font=dict(size=11, color="#555"), x=0),
+                margin=dict(l=0, r=0, t=36, b=0), height=260,
+                title=dict(text="Question categories", font=dict(size=12, color="#666"), x=0),
                 xaxis=dict(showgrid=False, zeroline=False),
                 yaxis=dict(showgrid=False),
             )
             st.plotly_chart(fig_cat, use_container_width=True)
 
-        # Expected source files
         st.markdown("---")
         st.markdown("#### Expected source files")
+
         expected_sources = {}
         source_groups_map = {}
         for q in golden:
-            sources = q.get("source_documents", [])
-            for s in sources:
+            for s in q.get("source_documents", []):
                 expected_sources[s] = expected_sources.get(s, 0) + 1
                 sl = s.lower()
-                if any(x in sl for x in ["peft", "transformers", "llm_tutorial", "pipeline", "tokeniz", "training", "perf_train", "generation", "quantization", "bitsandbytes", "deepspeed", "kv_cache"]):
+                if any(x in sl for x in ["peft","transformers","llm_tutorial","pipeline","tokeniz","training","perf_train","generation","quantization","bitsandbytes","deepspeed","kv_cache"]):
                     source_groups_map[s] = "huggingface"
-                elif any(x in sl for x in ["langchain", "lcel", "agent", "chain", "retriever"]):
+                elif any(x in sl for x in ["langchain","lcel","agent","chain","retriever"]):
                     source_groups_map[s] = "langchain"
                 elif "anthropic" in sl:
                     source_groups_map[s] = "anthropic"
-                elif any(x in sl for x in ["paper", "pdf", "lora", "rag", "attention", "selfrag", "hyde"]):
+                elif any(x in sl for x in ["paper","pdf","lora","rag","attention","selfrag","hyde"]):
                     source_groups_map[s] = "papers"
                 else:
                     source_groups_map[s] = "other"
@@ -843,7 +681,7 @@ with tab_sources:
             columns=["source_file", "questions"]
         )
         src_df["group"] = src_df["source_file"].map(lambda x: source_groups_map.get(x, "other"))
-        src_df["color"] = src_df["group"].map(lambda x: corpus_colors.get(x, "#888"))
+        src_df["color"] = src_df["group"].map(lambda x: corpus_colors_map.get(x, "#888"))
 
         fig_src = go.Figure()
         for _, row in src_df.iterrows():
@@ -852,33 +690,18 @@ with tab_sources:
                 x=[row["questions"]],
                 orientation="h",
                 marker_color=row["color"],
-                marker_line_color=row["color"],
-                marker_line_width=0.5,
                 showlegend=False,
             ))
         fig_src.update_layout(
             plot_bgcolor="#16161a", paper_bgcolor="#16161a",
             font=dict(color="#888", size=10),
             margin=dict(l=0, r=20, t=10, b=0),
-            height=max(300, len(src_df) * 20),
-            xaxis=dict(showgrid=False, zeroline=False, dtick=1, title="questions targeting this file"),
+            height=max(320, len(src_df) * 22),
+            xaxis=dict(showgrid=False, zeroline=False, dtick=1,
+                       title="questions targeting this file"),
             yaxis=dict(showgrid=False, autorange="reversed"),
         )
         st.plotly_chart(fig_src, use_container_width=True)
-
-        # Coverage gaps
-        st.markdown("---")
-        st.markdown("#### Corpus gaps")
-        st.markdown('<div class="warn-box">Langchain agent files not indexed — q005, q006, q012, q017 unanswerable across ALL strategies. Anthropic docs = 0 questions (not in corpus).</div>', unsafe_allow_html=True)
-
-        df = load_csv()
-        if df is not None:
-            df_clean = df[~df["answer"].str.contains("ERROR", na=False)]
-            low_conf = df_clean[df_clean["confidence"] < 0.3].groupby("question_id").size()
-            if len(low_conf) > 0:
-                gap_ids = low_conf[low_conf == 4].index.tolist()
-                if gap_ids:
-                    st.markdown(f'<div class="err-box">Consistent failures (all 4 strategies low confidence): {", ".join(gap_ids)}</div>', unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -886,68 +709,74 @@ with tab_sources:
 # =============================================================================
 
 with tab_about:
-    st.markdown("### Architecture")
 
-    col_a, col_b = st.columns(2)
-
-    with col_a:
-        st.markdown("""
-        <div style="background:#16161a;border:1px solid #2a2a2e;border-radius:8px;padding:16px;margin-bottom:10px;">
-          <div style="font-size:11px;color:#7f77dd;letter-spacing:1px;margin-bottom:12px;">RETRIEVAL STRATEGIES</div>
-          <div style="font-size:11px;font-family:monospace;color:#555;line-height:2.2;">
-            <span style="color:#5dcaa5;">naive</span> &nbsp;&nbsp;&nbsp;&nbsp; vector search &rarr; fixed_size chunks<br>
-            <span style="color:#afa9ec;">hybrid</span> &nbsp;&nbsp;&nbsp; BM25 + vector + RRF fusion<br>
-            <span style="color:#ef9f27;">hyde</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; hypothetical doc &rarr; embed &rarr; search<br>
-            <span style="color:#f0997b;">reranked</span> &nbsp; hybrid top 20 &rarr; cross-encoder &rarr; top 5
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-        <div style="background:#16161a;border:1px solid #2a2a2e;border-radius:8px;padding:16px;margin-bottom:10px;">
-          <div style="font-size:11px;color:#7f77dd;letter-spacing:1px;margin-bottom:12px;">EVALUATION METRICS</div>
-          <div style="font-size:11px;font-family:monospace;color:#555;line-height:2.2;">
-            term_hit_rate &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; must_contain_terms in answer<br>
-            abstention_acc &nbsp;&nbsp;&nbsp;&nbsp; is_answerable == expected<br>
-            conf_calibration &nbsp;&nbsp; confidence in expected range<br>
-            recall@k &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; after full benchmark run<br>
-            mrr &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; mean reciprocal rank
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col_b:
-        st.markdown("""
-        <div style="background:#16161a;border:1px solid #2a2a2e;border-radius:8px;padding:16px;margin-bottom:10px;">
-          <div style="font-size:11px;color:#7f77dd;letter-spacing:1px;margin-bottom:12px;">TECH STACK</div>
-          <div style="font-size:11px;font-family:monospace;color:#555;line-height:2.2;">
-            llm &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Groq llama-3.3-70b-versatile<br>
-            embeddings &nbsp; all-MiniLM-L6-v2 (384d)<br>
-            vector db &nbsp;&nbsp; Qdrant local (30,432 pts)<br>
-            bm25 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; rank_bm25<br>
-            reranker &nbsp;&nbsp;&nbsp; ms-marco-MiniLM-L-6-v2<br>
-            api &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; FastAPI + asyncio.gather<br>
-            outputs &nbsp;&nbsp;&nbsp;&nbsp; instructor + pydantic
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-        <div style="background:#16161a;border:1px solid #2a2a2e;border-radius:8px;padding:16px;">
-          <div style="font-size:11px;color:#7f77dd;letter-spacing:1px;margin-bottom:12px;">CORPUS</div>
-          <div style="font-size:11px;font-family:monospace;color:#555;line-height:2.2;">
-            huggingface docs &nbsp; peft, transformers, training<br>
-            langchain docs &nbsp;&nbsp;&nbsp; agents, retrievers, lcel<br>
-            research papers &nbsp;&nbsp; lora, rag, attention, hyde<br>
-            golden dataset &nbsp;&nbsp;&nbsp; 30 tiered questions<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; tier1=easy tier2=multi tier3=adversarial
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("---")
+    # Hero line
     st.markdown("""
-    <div style="font-size:11px;font-family:monospace;color:#444;line-height:2;text-align:center;padding:8px;">
-      RAG fails silently &mdash; naive retrieval vs reranked hybrid &mdash; built to measure the gap
+    <div style="padding: 20px 0 24px;">
+      <div style="font-size:22px;font-weight:500;color:#cccccc;margin-bottom:6px;">Multi-Strategy RAG Benchmark</div>
+      <div style="font-size:13px;color:#555;font-family:monospace;line-height:1.8;">
+        RAG fails silently — naive retrieval vs reranked hybrid — built to measure the gap.
+      </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Key numbers
+    st.markdown("""
+    <div class="stat-grid" style="margin-bottom:16px;">
+      <div class="stat-box"><div class="stat-num">+31%</div><div class="stat-label">judge score improvement — reranked over naive</div></div>
+      <div class="stat-box"><div class="stat-num">93%</div><div class="stat-label">abstention accuracy — hybrid on adversarial questions</div></div>
+      <div class="stat-box"><div class="stat-num">3x</div><div class="stat-label">parallel speedup — asyncio.gather vs sequential</div></div>
+      <div class="stat-box"><div class="stat-num">30</div><div class="stat-label">golden questions — tiered, hand-crafted benchmark</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_l, col_r = st.columns(2)
+
+    with col_l:
+        st.markdown("""
+        <div class="about-card">
+          <div class="about-heading">Retrieval strategies</div>
+          <div class="about-row"><span class="about-key">naive</span><span class="about-val">vector search → fixed chunks</span></div>
+          <div class="about-row"><span class="about-key">hybrid</span><span class="about-val">BM25 + vector + RRF fusion</span></div>
+          <div class="about-row"><span class="about-key">hyde</span><span class="about-val">hypothetical doc → embed → search</span></div>
+          <div class="about-row"><span class="about-key">reranked</span><span class="about-val">hybrid top 20 → cross-encoder → top 5</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="about-card">
+          <div class="about-heading">Evaluation layers</div>
+          <div class="about-row"><span class="about-key">term_hit_rate</span><span class="about-val">right terms in answer?</span></div>
+          <div class="about-row"><span class="about-key">abstention_acc</span><span class="about-val">knows when not to answer?</span></div>
+          <div class="about-row"><span class="about-key">conf_calibration</span><span class="about-val">confidence honest?</span></div>
+          <div class="about-row"><span class="about-key">faithfulness</span><span class="about-val">LLM judge — grounded claims</span></div>
+          <div class="about-row"><span class="about-key">hallucination_free</span><span class="about-val">LLM judge — no invented facts</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_r:
+        st.markdown("""
+        <div class="about-card">
+          <div class="about-heading">Tech stack</div>
+          <div class="about-row"><span class="about-key">LLM</span><span class="about-val">Groq — llama-3.3-70b-versatile</span></div>
+          <div class="about-row"><span class="about-key">judge</span><span class="about-val">Groq — llama-3.1-8b-instant</span></div>
+          <div class="about-row"><span class="about-key">embeddings</span><span class="about-val">all-MiniLM-L6-v2 (384d)</span></div>
+          <div class="about-row"><span class="about-key">vector db</span><span class="about-val">Qdrant local — 30,432 pts</span></div>
+          <div class="about-row"><span class="about-key">keyword</span><span class="about-val">rank_bm25 — 7,123 chunks</span></div>
+          <div class="about-row"><span class="about-key">reranker</span><span class="about-val">ms-marco-MiniLM-L-6-v2</span></div>
+          <div class="about-row"><span class="about-key">API</span><span class="about-val">FastAPI + asyncio.gather</span></div>
+          <div class="about-row"><span class="about-key">outputs</span><span class="about-val">instructor + pydantic</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="about-card">
+          <div class="about-heading">Benchmark results</div>
+          <div class="about-row"><span class="about-key">reranked judge</span><span class="about-val about-highlight">0.678 — best overall</span></div>
+          <div class="about-row"><span class="about-key">naive judge</span><span class="about-val">0.518 — baseline</span></div>
+          <div class="about-row"><span class="about-key">hybrid abstention</span><span class="about-val about-highlight">93.1% — best</span></div>
+          <div class="about-row"><span class="about-key">hyde abstention</span><span class="about-val">75.9%</span></div>
+          <div class="about-row"><span class="about-key">hybrid latency</span><span class="about-val about-highlight">3.3s — fastest</span></div>
+          <div class="about-row"><span class="about-key">hyde latency</span><span class="about-val">4.6s — slowest (2× LLM calls)</span></div>
+        </div>
+        """, unsafe_allow_html=True)
