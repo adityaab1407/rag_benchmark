@@ -37,7 +37,7 @@ class NaiveRAG:
 
     def generate(self, query: str, chunks: List[dict]) -> RAGResponse:
         # Build context from retrieved chunks
-        context = "\n\n---\n\n".join([c["content"] for c in chunks])
+        context = "\n\n---\n\n".join([c["content"][:800] for c in chunks])
 
         # Instructor forces Groq to return a RAGResponse object
         # If Groq returns plain text, Instructor retries automatically

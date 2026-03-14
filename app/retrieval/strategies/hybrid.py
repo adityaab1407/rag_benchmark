@@ -89,7 +89,7 @@ class HybridRAG:
         return merged[:top_k]
 
     def generate(self, query: str, chunks: List[dict]) -> RAGResponse:
-        context = "\n\n---\n\n".join([c["content"] for c in chunks])
+        context = "\n\n---\n\n".join([c["content"][:800] for c in chunks])
 
         response = self.client.chat.completions.create(
             model="llama-3.3-70b-versatile",

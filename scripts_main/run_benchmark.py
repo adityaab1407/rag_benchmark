@@ -45,6 +45,8 @@ def load_existing_results():
         reader = csv.DictReader(f)
         for row in reader:
             if "ERROR" not in str(row.get("answer", "")):
+                if "top_sources" not in row:
+                    row["top_sources"] = ""   # backfill missing column
                 existing_results.append(row)
                 completed.add((row["question_id"], row["strategy"]))
 

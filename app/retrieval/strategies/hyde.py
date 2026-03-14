@@ -100,7 +100,7 @@ class HyDeRAG:
     def generate(self, query: str, chunks: List[dict]) -> RAGResponse:
         # Call 2 - generate real answer from retrieved chunks
         # Same as naive from here - only retrieval step was different
-        context = "\n\n---\n\n".join([c["content"] for c in chunks])
+        context = "\n\n---\n\n".join([c["content"][:800] for c in chunks])
 
         response = self.client.chat.completions.create(
             model="llama-3.3-70b-versatile",
