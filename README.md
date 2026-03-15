@@ -21,7 +21,7 @@ Most RAG systems ship without evaluation. This platform benchmarks four retrieva
 
 </details>
 
-[▶ Watch demo (30s)](https://youtube.com/https://youtu.be/omcvvyd8DJ8)
+[▶ Watch demo (30s)](https://youtu.be/omcvvyd8DJ8)
 ---
 
 ## The Problem
