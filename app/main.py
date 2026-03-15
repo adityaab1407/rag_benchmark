@@ -10,7 +10,7 @@ from app.retrieval.strategies.hybrid import HybridRAG
 from app.retrieval.strategies.hyde import HyDeRAG
 from app.retrieval.strategies.reranked import RerankedRAG
 from app.database import init_db
-from app.middleware import ObservabilityMiddleware   # NEW
+from app.middleware import ObservabilityMiddleware
 
 
 app_state = {}
@@ -67,7 +67,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(ObservabilityMiddleware)          # NEW
+app.add_middleware(ObservabilityMiddleware)
 
 from app.api.routes import router
 app.include_router(router, prefix="/api/v1")

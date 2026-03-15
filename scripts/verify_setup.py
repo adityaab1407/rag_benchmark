@@ -75,7 +75,7 @@ def verify():
     logger.info("Results: {} passed, {} failed", passed, failed)
 
     if failed == 0:
-        logger.info("All checks passed - Day 1 complete! Ready for Day 2.")
+        logger.info("All checks passed! Ready to run.")
     else:
         logger.warning("{} checks failed - fix before continuing", failed)
 

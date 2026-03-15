@@ -427,4 +427,3 @@ if __name__ == "__main__":
 
     print()
     print("NOTE: Full Recall@K requires chunk metadata in CSV")
-    print("      Tomorrow's complete benchmark will enable this")

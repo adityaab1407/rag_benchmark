@@ -31,7 +31,7 @@ class HyDeRAG:
         Call 1: Generate a hypothetical answer.
         Returns (hypothesis_text, TokenUsage)
         """
-        # Use raw Groq client so we can access usage
+        # Raw client needed to access usage stats from response
         from groq import Groq as RawGroq
         raw_client = RawGroq(api_key=settings.groq_api_key)
 

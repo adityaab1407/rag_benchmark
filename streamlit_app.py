@@ -450,7 +450,7 @@ with tab_benchmark:
     df_judge = load_judge_csv()
 
     if df is None:
-        st.markdown('<div class="warn-box">No benchmark CSV in results/ — run scripts_main/run_benchmark.py</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box">No benchmark CSV in results/ — run scripts/run_benchmark.py</div>', unsafe_allow_html=True)
     else:
         df_clean   = df[~df["answer"].str.contains("ERROR", na=False)]
         golden     = load_golden()

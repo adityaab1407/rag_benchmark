@@ -1,15 +1,3 @@
-"""
-app/retrieval/strategies/naive.py — UPDATED VERSION
-=====================================================
-Changes from original:
-  + Captures token usage from Groq response
-  + Calculates cost per query
-  + Returns TokenUsage in RAGResult
-
-Same pattern applies to hybrid.py, hyde.py, reranked.py
-Only the generate() method changes.
-"""
-
 import time
 from typing import List
 from loguru import logger
@@ -138,29 +126,3 @@ class NaiveRAG:
         import asyncio
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.run, query, top_k)
-
-
-# =============================================================================
-# SAME PATTERN FOR OTHER STRATEGIES
-# In hybrid.py, hyde.py, reranked.py:
-#
-# 1. Add self.model = "llama-3.3-70b-versatile" in __init__
-#
-# 2. Change generate() signature to return tuple:
-#    def generate(...) -> tuple[RAGResponse, TokenUsage]:
-#
-# 3. Change create() to create_with_completion():
-#    response, raw = self.client.chat.completions.create_with_completion(...)
-#
-# 4. Extract usage same way as above
-#
-# 5. Update run() to unpack tuple:
-#    response, token_usage = self.generate(query, chunks)
-#
-# 6. Add token_usage and cost_usd to RAGResult()
-#
-# NOTE: hyde.py makes 2 LLM calls (hypothesis + generation)
-#       Capture usage from BOTH and sum them:
-#       total_tokens = hypothesis_tokens + generation_tokens
-#       total_cost   = hypothesis_cost + generation_cost
-# =============================================================================

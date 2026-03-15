@@ -9,9 +9,6 @@ from loguru import logger
 
 @dataclass
 class Document:
-    # content  = the actual text extracted from the file
-    # metadata = info about where it came from
-    # metadata survives all the way to the final answer
     content: str
     metadata: dict
 

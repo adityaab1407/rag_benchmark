@@ -2,17 +2,19 @@
 .env
 .rag_bench/
 
-# Data - too large for git
+# Data — raw corpus files (golden dataset is tracked)
 data/raw/
 qdrant_storage/
 bm25_index.pkl
-pipeline_monitor.db
+*.db
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+build/
+*.egg-info/
 
 # Logs
 logs/

@@ -1,15 +1,3 @@
-"""
-app/models.py  — UPDATED VERSION
-==================================
-Added TokenUsage and updated RAGResult to capture
-token usage from Groq responses.
-
-Changes from original:
-  + TokenUsage         new model for token tracking
-  + RAGResult          added token_usage, request_id, cost_usd fields
-  Everything else unchanged.
-"""
-
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
 
@@ -49,7 +37,7 @@ class TokenUsage(BaseModel):
 
 
 # =============================================================================
-# EXISTING MODELS — UNCHANGED
+# REQUEST / RESPONSE MODELS
 # =============================================================================
 
 class RAGResponse(BaseModel):
@@ -58,6 +46,11 @@ class RAGResponse(BaseModel):
     confidence:    float = Field(ge=0.0, le=1.0, description="Confidence score 0-1")
     is_answerable: bool  = Field(description="Whether the question can be answered from context")
     reasoning:     str   = Field(description="Brief reasoning for the answer and confidence")
+
+
+# =============================================================================
+# TOKEN USAGE MODEL
+# =============================================================================
 
 
 class RAGResult(BaseModel):
@@ -70,8 +63,6 @@ class RAGResult(BaseModel):
     reasoning:        str
     retrieved_chunks: List[Dict] = []
     latency:          Dict[str, float] = {}
-
-    # NEW — observability fields
     token_usage:  Optional[TokenUsage] = None
     request_id:   Optional[str]        = None
     cost_usd:     Optional[float]      = None
