@@ -8,6 +8,22 @@ Most RAG systems ship without evaluation. This platform benchmarks four retrieva
 
 ---
 
+## Screenshots
+
+![Query tab — all 4 strategies running in parallel](assets/query.png)
+
+<details>
+<summary>Benchmark results & Observability</summary>
+
+![Benchmark results — abstention, calibration, judge scores](assets/benchmark.png)
+
+![Observability — token usage and cost per strategy](assets/observability.png)
+
+</details>
+
+[▶ Watch demo (30s)](https://youtube.com/https://youtu.be/omcvvyd8DJ8)
+---
+
 ## The Problem
 
 RAG fails silently. A naive vector search pipeline returns answers that *look* reasonable but hallucinate specific details, retrieve irrelevant chunks, and confidently answer questions it shouldn't. Without a structured evaluation system, teams have no way to quantify the gap between a baseline and a better approach.
@@ -214,5 +230,14 @@ rag_benchmark/
 ├── docker-compose.yml             # FastAPI + Qdrant + Redis
 ├── Dockerfile
 └── Dockerfile.streamlit
+```
 
 ---
+
+## What's Next
+
+- [ ] RAGAS integration — `context_precision`, `context_recall` metrics
+- [ ] Redis caching — repeated query latency from 4s → 50ms
+- [ ] Docker deploy — full containerised stack
+- [ ] MCP server — Claude Desktop integration
+- [ ] Semantic chunking — 5th strategy comparison
