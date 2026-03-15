@@ -1,10 +1,8 @@
-# Multi-Strategy RAG Benchmark Platform
+# Multi Strategy RAG Benchmark Platform
 
 > For setup and usage instructions see [SETUP.md](SETUP.md)
 
 Most RAG systems ship without evaluation. This platform benchmarks four retrieval strategies head-to-head — measuring hallucination, abstention accuracy, and answer quality across 30 adversarial questions. Naive RAG hallucinated on 67% of factual grounding checks. Reranked hybrid cut that to 50%. The numbers are real and reproducible.
-
-> This project separates retrieval quality from generation quality — a distinction most RAG implementations ignore entirely.
 
 ---
 
@@ -12,16 +10,14 @@ Most RAG systems ship without evaluation. This platform benchmarks four retrieva
 
 ![Query tab — all 4 strategies running in parallel](assets/query.png)
 
-<details>
 <summary>Benchmark results & Observability</summary>
 
 ![Benchmark results — abstention, calibration, judge scores](assets/benchmark.png)
 
 ![Observability — token usage and cost per strategy](assets/observability.png)
 
-</details>
 
-[▶ Watch demo (30s)](https://youtu.be/omcvvyd8DJ8)
+[▶ Watch demo](https://youtu.be/omcvvyd8DJ8)
 ---
 
 ## The Problem
