@@ -1,27 +1,30 @@
-"""
-app/api/routes.py — UPDATED VERSION
-=====================================
-Changes from original:
-  + Imports log_observability from database
-  + Imports get_request_id from middleware
-  + /query endpoint logs to observability_log
-  + /benchmark endpoint logs all 4 strategies + total cost
-  Everything else unchanged.
-"""
-
 import time
 import asyncio
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 from loguru import logger
 
 from app.models import (
     QueryRequest, BenchmarkRequest,
     RAGResult, StrategyComparison, BenchmarkResult,
 )
-from app.database import log_query, log_observability
+from app.database import log_query, log_observability, save_feedback
 from app.middleware import get_request_id
 
 router = APIRouter()
+
+
+# =============================================================================
+# FEEDBACK MODEL
+# =============================================================================
+
+class FeedbackRequest(BaseModel):
+    request_id: str = ""
+    strategy:   str
+    question:   str
+    answer:     str
+    rating:     int   # +1 thumbs up, -1 thumbs down
+    comment:    str = ""
 
 
 # =============================================================================
@@ -60,10 +63,10 @@ async def strategies(request: Request):
 
 @router.post("/query")
 async def query(request: Request, body: QueryRequest):
-    app_state  = request.app.state
-    req_id     = get_request_id()
-    strategy   = body.strategy
-    top_k      = body.top_k or 5
+    app_state = request.app.state
+    req_id    = get_request_id()
+    strategy  = body.strategy
+    top_k     = body.top_k or 5
 
     strategy_map = {
         "naive":    app_state.naive_rag,
@@ -80,7 +83,6 @@ async def query(request: Request, body: QueryRequest):
     try:
         result: RAGResult = await rag.run_async(body.question, top_k)
 
-        # Log to original query_logs table
         top_score = result.retrieved_chunks[0].get("score", 0.0) if result.retrieved_chunks else 0.0
         await log_query(
             strategy=strategy,
@@ -94,7 +96,6 @@ async def query(request: Request, body: QueryRequest):
             top_chunk_score=top_score,
         )
 
-        # NEW — log to observability table
         token_usage = result.token_usage
         await log_observability(
             request_id=req_id,
@@ -115,8 +116,7 @@ async def query(request: Request, body: QueryRequest):
 
         logger.info(
             "[{}] /query {} — tokens={} cost=${:.6f}",
-            req_id,
-            strategy,
+            req_id, strategy,
             token_usage.total_tokens if token_usage else 0,
             token_usage.cost_usd if token_usage else 0,
         )
@@ -135,7 +135,7 @@ async def query(request: Request, body: QueryRequest):
 
 
 # =============================================================================
-# BENCHMARK — ALL 4 STRATEGIES IN PARALLEL
+# BENCHMARK — ALL 4 IN PARALLEL
 # =============================================================================
 
 @router.post("/benchmark")
@@ -146,7 +146,6 @@ async def benchmark(request: Request, body: BenchmarkRequest):
 
     t_start = time.time()
 
-    # Run all 4 in parallel
     results = await asyncio.gather(
         app_state.naive_rag.run_async(body.question, top_k),
         app_state.hybrid_rag.run_async(body.question, top_k),
@@ -155,13 +154,11 @@ async def benchmark(request: Request, body: BenchmarkRequest):
         return_exceptions=True,
     )
 
-    total_time   = round(time.time() - t_start, 3)
-    comparisons  = []
-    total_cost   = 0.0
+    total_time  = round(time.time() - t_start, 3)
+    comparisons = []
+    total_cost  = 0.0
 
-    strategy_names = ["naive", "hybrid", "hyde", "reranked"]
-
-    for strategy_name, result in zip(strategy_names, results):
+    for strategy_name, result in zip(["naive", "hybrid", "hyde", "reranked"], results):
         if isinstance(result, Exception):
             comparisons.append(StrategyComparison(
                 strategy=strategy_name,
@@ -172,8 +169,6 @@ async def benchmark(request: Request, body: BenchmarkRequest):
                 top_chunk_score=0.0,
                 retrieval_method=strategy_name,
             ))
-
-            # Log error
             await log_observability(
                 request_id=req_id,
                 endpoint="/benchmark",
@@ -186,8 +181,7 @@ async def benchmark(request: Request, body: BenchmarkRequest):
         token_usage = result.token_usage
         cost        = token_usage.cost_usd if token_usage else 0.0
         total_cost += cost
-
-        top_score = result.retrieved_chunks[0].get("score", 0.0) if result.retrieved_chunks else 0.0
+        top_score   = result.retrieved_chunks[0].get("score", 0.0) if result.retrieved_chunks else 0.0
 
         comparisons.append(StrategyComparison(
             strategy=strategy_name,
@@ -201,7 +195,6 @@ async def benchmark(request: Request, body: BenchmarkRequest):
             cost_usd=cost,
         ))
 
-        # Log each strategy to observability
         await log_observability(
             request_id=req_id,
             endpoint="/benchmark",
@@ -219,8 +212,7 @@ async def benchmark(request: Request, body: BenchmarkRequest):
             model=token_usage.model if token_usage else "",
         )
 
-    # Find best and fastest
-    answered = [c for c in comparisons if c.is_answerable and not c.answer.startswith("ERROR")]
+    answered         = [c for c in comparisons if c.is_answerable and not c.answer.startswith("ERROR")]
     best_strategy    = max(answered, key=lambda x: x.confidence).strategy if answered else "none"
     fastest_strategy = min(
         [c for c in comparisons if not c.answer.startswith("ERROR")],
@@ -233,13 +225,12 @@ async def benchmark(request: Request, body: BenchmarkRequest):
             summary_parts.append(f"{c.strategy}: FAILED")
         else:
             summary_parts.append(
-                f"{c.strategy}: confidence={c.confidence} latency={c.latency.get('total',0):.3f}s cost=${c.cost_usd:.6f}"
+                f"{c.strategy}: confidence={c.confidence} "
+                f"latency={c.latency.get('total',0):.3f}s "
+                f"cost=${c.cost_usd:.6f}"
             )
 
-    logger.info(
-        "[{}] /benchmark — {}s total — ${:.6f} total cost",
-        req_id, total_time, total_cost,
-    )
+    logger.info("[{}] /benchmark — {}s — ${:.6f}", req_id, total_time, total_cost)
 
     return BenchmarkResult(
         query=body.question,
@@ -251,3 +242,37 @@ async def benchmark(request: Request, body: BenchmarkRequest):
         total_cost_usd=round(total_cost, 8),
         request_id=req_id,
     )
+
+
+# =============================================================================
+# FEEDBACK
+# =============================================================================
+
+@router.post("/feedback")
+async def feedback(request: Request, body: FeedbackRequest):
+    if body.rating not in [1, -1]:
+        raise HTTPException(status_code=400, detail="rating must be 1 or -1")
+
+    req_id = get_request_id()
+
+    await save_feedback(
+        request_id=body.request_id or req_id,
+        strategy=body.strategy,
+        question=body.question,
+        answer=body.answer,
+        rating=body.rating,
+        comment=body.comment,
+    )
+
+    logger.info(
+        "[{}] Feedback: {} {} — {}",
+        req_id, body.strategy,
+        "👍" if body.rating == 1 else "👎",
+        body.question[:40],
+    )
+
+    return {
+        "status":   "saved",
+        "strategy": body.strategy,
+        "rating":   body.rating,
+    }
