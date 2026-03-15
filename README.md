@@ -231,13 +231,3 @@ rag_benchmark/
 ├── Dockerfile
 └── Dockerfile.streamlit
 ```
-
----
-
-## What's Next
-
-- [ ] RAGAS integration — `context_precision`, `context_recall` metrics
-- [ ] Redis caching — repeated query latency from 4s → 50ms
-- [ ] Docker deploy — full containerised stack
-- [ ] MCP server — Claude Desktop integration
-- [ ] Semantic chunking — 5th strategy comparison
