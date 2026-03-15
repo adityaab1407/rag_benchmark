@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 import json
+import sqlite3
 from pathlib import Path
 
 
@@ -18,14 +19,6 @@ STRATEGY_COLORS = {
     "hyde":     "#EF9F27",
     "reranked": "#F0997B",
 }
-
-SAMPLE_QUESTIONS = [
-    "What is LoRA and how does it reduce trainable parameters?",
-    "What are the two RAG formulations introduced in the original RAG paper?",
-    "How does the attention mechanism work in transformers?",
-    "What is the difference between RAG-Token and RAG-Sequence?",
-    "How does BitsAndBytes quantization reduce memory usage?",
-]
 
 st.set_page_config(
     page_title="RAG Benchmark",
@@ -53,6 +46,8 @@ st.markdown("""
   div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #afa9ec !important; font-size: 22px !important; }
 
   .stTextArea textarea { background-color: #1a1a1f !important; color: #cccccc !important; border: 1px solid #2a2a2e !important; border-radius: 6px !important; font-size: 13px !important; }
+  .stSelectbox > div > div { background-color: #1a1a1f !important; border: 1px solid #2a2a2e !important; color: #cccccc !important; }
+  .stSelectbox div[data-baseweb="select"] span { color: #cccccc !important; }
 
   .stButton > button {
     background-color: #7f77dd22;
@@ -64,20 +59,6 @@ st.markdown("""
     width: 100%;
   }
   .stButton > button:hover { background-color: #7f77dd44; border-color: #afa9ec; color: #ffffff; }
-
-  /* Sample question pills */
-  .pill-btn > button {
-    background-color: #1a1a1f !important;
-    border: 1px solid #2a2a2e !important;
-    color: #666 !important;
-    border-radius: 20px !important;
-    font-size: 11px !important;
-    padding: 3px 12px !important;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .pill-btn > button:hover { border-color: #7f77dd66 !important; color: #afa9ec !important; }
 
   .stDataFrame { border: 1px solid #2a2a2e; border-radius: 8px; }
   .streamlit-expanderHeader { background-color: #16161a !important; color: #888 !important; border: 1px solid #2a2a2e !important; border-radius: 6px !important; }
@@ -117,7 +98,7 @@ st.markdown("""
   .about-key { color: #555; }
   .about-val { color: #aaa; }
   .about-highlight { color: #afa9ec !important; font-weight: 500; }
-  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
   .stat-box { background: #1a1a1f; border-radius: 6px; padding: 10px 12px; }
   .stat-num { font-size: 20px; font-weight: 500; color: #afa9ec; font-family: monospace; }
   .stat-label { font-size: 10px; color: #555; margin-top: 2px; }
@@ -182,13 +163,72 @@ def load_golden():
     return data.get("questions", data) if isinstance(data, dict) else data
 
 
+def load_observability_stats():
+    db_path = "pipeline_monitor.db"
+    try:
+        conn   = sqlite3.connect(db_path)
+        tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table'", conn)
+        if "observability_log" not in tables["name"].values:
+            conn.close()
+            return None
+
+        per_strategy = pd.read_sql("""
+            SELECT
+                strategy,
+                COUNT(*)                             AS total_requests,
+                ROUND(AVG(total_tokens), 0)          AS avg_tokens,
+                ROUND(SUM(cost_usd), 6)              AS total_cost,
+                ROUND(AVG(cost_usd), 6)              AS avg_cost,
+                ROUND(AVG(total_ms), 0)              AS avg_latency_ms,
+                ROUND(AVG(confidence), 3)            AS avg_confidence,
+                SUM(CASE WHEN error != '' THEN 1 ELSE 0 END) AS errors
+            FROM observability_log
+            WHERE strategy != '' AND strategy IS NOT NULL
+            GROUP BY strategy
+            ORDER BY strategy
+        """, conn)
+
+        recent = pd.read_sql("""
+            SELECT
+                timestamp, request_id, strategy,
+                SUBSTR(query, 1, 60)         AS query,
+                total_tokens,
+                ROUND(cost_usd, 6)           AS cost_usd,
+                ROUND(total_ms, 0)           AS total_ms,
+                ROUND(confidence, 2)         AS confidence,
+                is_answerable,
+                CASE WHEN error != '' THEN 'ERROR' ELSE 'OK' END AS status
+            FROM observability_log
+            ORDER BY id DESC
+            LIMIT 30
+        """, conn)
+
+        summary = pd.read_sql("""
+            SELECT
+                COUNT(*)                    AS total_requests,
+                ROUND(SUM(cost_usd), 6)     AS total_cost,
+                SUM(total_tokens)           AS total_tokens,
+                ROUND(AVG(total_ms), 0)     AS avg_latency_ms,
+                SUM(CASE WHEN error != '' THEN 1 ELSE 0 END) AS total_errors
+            FROM observability_log
+        """, conn)
+
+        conn.close()
+        return {
+            "per_strategy": per_strategy,
+            "recent":       recent,
+            "summary":      summary,
+        }
+    except Exception:
+        return None
+
+
 def safe_avg(series):
     vals = series.dropna()
     return round(float(vals.mean()), 3) if len(vals) > 0 else 0.0
 
 
 def horizontal_bar(data_dict, title, x_max=None, x_suffix="", height=220):
-    """data_dict: {strategy: value}"""
     fig = go.Figure()
     for strategy, value in data_dict.items():
         fig.add_trace(go.Bar(
@@ -202,8 +242,7 @@ def horizontal_bar(data_dict, title, x_max=None, x_suffix="", height=220):
             textfont=dict(size=11, color="#aaa"),
         ))
     layout = dict(
-        plot_bgcolor="#16161a",
-        paper_bgcolor="#16161a",
+        plot_bgcolor="#16161a", paper_bgcolor="#16161a",
         font=dict(color="#888", size=12),
         margin=dict(l=10, r=50, t=36, b=10),
         height=height,
@@ -220,7 +259,7 @@ def horizontal_bar(data_dict, title, x_max=None, x_suffix="", height=220):
 
 def conf_bar_html(confidence, strategy):
     color = STRATEGY_COLORS.get(strategy, "#888")
-    pct = int(confidence * 100)
+    pct   = int(confidence * 100)
     return f"""
     <div style="margin:8px 0 4px;">
       <div class="conf-label">
@@ -287,8 +326,8 @@ with st.sidebar:
 # TABS
 # =============================================================================
 
-tab_query, tab_benchmark, tab_sources, tab_about = st.tabs([
-    "Query", "Benchmark", "Sources", "About"
+tab_query, tab_benchmark, tab_sources, tab_obs, tab_about = st.tabs([
+    "Query", "Benchmark", "Sources", "Observability", "About"
 ])
 
 
@@ -326,17 +365,19 @@ with tab_query:
                 st.markdown(f'<div class="err-box">Error: {result["error"]}</div>', unsafe_allow_html=True)
             else:
                 strategies_data = result.get("strategies", [])
-                answered = sum(1 for s in strategies_data if s.get("is_answerable"))
+                answered        = sum(1 for s in strategies_data if s.get("is_answerable"))
+                total_cost      = result.get("total_cost_usd", 0) or 0
 
-                c1, c2, c3, c4 = st.columns(4)
+                c1, c2, c3, c4, c5 = st.columns(5)
                 c1.metric("Best strategy",  result.get("best_strategy", "—").upper())
                 c2.metric("Fastest",        result.get("fastest_strategy", "—").upper())
                 c3.metric("Wall time",      f'{result.get("total_time", 0):.1f}s')
                 c4.metric("Answerable",     f"{answered} / 4")
+                c5.metric("Total cost",     f'${total_cost:.5f}')
 
                 st.markdown("")
 
-                best = result.get("best_strategy")
+                best             = result.get("best_strategy")
                 sorted_strategies = sorted(
                     strategies_data,
                     key=lambda x: (x["strategy"] != best, -x.get("confidence", 0))
@@ -353,12 +394,12 @@ with tab_query:
                         f'generate {lat.get("generate",0):.2f}s &nbsp;|&nbsp; '
                         f'total {lat.get("total",0):.2f}s'
                     )
-                    raw_answer = s.get("answer", "")
-                    is_error = raw_answer.startswith("ERROR")
-                    answer_text = (
-                        '<span style="color:#f09595;font-size:12px;">Rate limit hit — try again tomorrow 5:30am IST</span>'
-                        if is_error else
-                        raw_answer[:400]
+
+                    raw_answer     = s.get("answer", "")
+                    is_error       = raw_answer.startswith("ERROR")
+                    answer_text    = (
+                        '<span style="color:#f09595;font-size:12px;">Rate limit hit — try again after quota resets</span>'
+                        if is_error else raw_answer[:400]
                     )
                     answerable_tag = (
                         '<span style="color:#f09595;font-size:10px;">rate limited</span>'
@@ -369,6 +410,10 @@ with tab_query:
                     )
                     conf_html = conf_bar_html(s.get("confidence", 0), s["strategy"])
 
+                    cost_str = ""
+                    if s.get("cost_usd") and not is_error:
+                        cost_str = f'&nbsp;|&nbsp; cost ${s["cost_usd"]:.5f}'
+
                     st.markdown(f"""
                     <div class="{card_class}">
                       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -377,7 +422,7 @@ with tab_query:
                       </div>
                       <div class="result-answer">{answer_text}</div>
                       {conf_html}
-                      <div class="result-meta" style="margin-top:8px;">{lat_str}</div>
+                      <div class="result-meta" style="margin-top:8px;">{lat_str}{cost_str}</div>
                     </div>""", unsafe_allow_html=True)
 
                     chunks = s.get("retrieved_chunks", [])
@@ -405,7 +450,7 @@ with tab_query:
 with tab_benchmark:
     st.markdown("### Benchmark results")
 
-    df    = load_csv()
+    df       = load_csv()
     df_judge = load_judge_csv()
 
     if df is None:
@@ -416,7 +461,6 @@ with tab_benchmark:
         golden     = load_golden()
         golden_map = {q["id"]: q for q in golden} if golden else {}
 
-        # Compute metrics
         metrics = {}
         for s in ["naive", "hybrid", "hyde", "reranked"]:
             sub = df_clean[df_clean["strategy"] == s]
@@ -439,8 +483,6 @@ with tab_benchmark:
                 "calibration": round(sum(calibration) / len(calibration) * 100, 1) if calibration else 0,
                 "avg_latency": round(float(sub["total_latency"].mean()), 2),
                 "avg_conf":    round(float(sub["confidence"].mean()), 2),
-                "answered":    int((sub["is_answerable"].astype(str).str.lower() == "true").sum()),
-                "total":       len(sub),
             }
 
         judge_metrics = {}
@@ -451,9 +493,7 @@ with tab_benchmark:
                     continue
                 judge_metrics[s] = {
                     "judge_score":        safe_avg(sub["judge_score"]),
-                    "faithfulness":       safe_avg(sub["faithfulness"]),
                     "hallucination_free": safe_avg(sub["hallucination_free"]),
-                    "abstention_correct": safe_avg(sub["abstention_correct"]),
                 }
 
         if metrics:
@@ -462,7 +502,6 @@ with tab_benchmark:
             best_fast  = min(metrics, key=lambda s: metrics[s]["avg_latency"])
             best_judge = max(judge_metrics, key=lambda s: judge_metrics[s]["judge_score"]) if judge_metrics else "—"
 
-            # Summary cards
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Best abstention",  best_abs.upper(),  f'{metrics[best_abs]["abstention"]}%')
             c2.metric("Best calibration", best_cal.upper(),  f'{metrics[best_cal]["calibration"]}%')
@@ -472,90 +511,62 @@ with tab_benchmark:
 
             st.markdown("")
 
-            # 4 big charts in 2x2 grid
             col1, col2 = st.columns(2)
-
             with col1:
-                st.plotly_chart(
-                    horizontal_bar(
-                        {s: metrics[s]["abstention"] for s in metrics},
-                        "Abstention accuracy — knows when NOT to answer",
-                        x_max=110, x_suffix="%", height=250
-                    ),
-                    use_container_width=True
-                )
+                st.plotly_chart(horizontal_bar(
+                    {s: metrics[s]["abstention"] for s in metrics},
+                    "Abstention accuracy — knows when NOT to answer",
+                    x_max=110, x_suffix="%", height=250
+                ), use_container_width=True)
 
             with col2:
-                st.plotly_chart(
-                    horizontal_bar(
-                        {s: metrics[s]["calibration"] for s in metrics},
-                        "Confidence calibration — honest confidence scores",
-                        x_max=110, x_suffix="%", height=250
-                    ),
-                    use_container_width=True
-                )
+                st.plotly_chart(horizontal_bar(
+                    {s: metrics[s]["calibration"] for s in metrics},
+                    "Confidence calibration — honest confidence scores",
+                    x_max=110, x_suffix="%", height=250
+                ), use_container_width=True)
 
             col3, col4 = st.columns(2)
-
             with col3:
                 if judge_metrics:
-                    st.plotly_chart(
-                        horizontal_bar(
-                            {s: judge_metrics[s]["judge_score"] for s in judge_metrics},
-                            "LLM judge — overall answer quality",
-                            x_max=1.1, height=250
-                        ),
-                        use_container_width=True
-                    )
+                    st.plotly_chart(horizontal_bar(
+                        {s: judge_metrics[s]["judge_score"] for s in judge_metrics},
+                        "LLM judge — overall answer quality",
+                        x_max=1.1, height=250
+                    ), use_container_width=True)
                 else:
-                    st.plotly_chart(
-                        horizontal_bar(
-                            {s: metrics[s]["avg_conf"] for s in metrics},
-                            "Average confidence score",
-                            x_max=1.1, height=250
-                        ),
-                        use_container_width=True
-                    )
+                    st.plotly_chart(horizontal_bar(
+                        {s: metrics[s]["avg_conf"] for s in metrics},
+                        "Average confidence score", x_max=1.1, height=250
+                    ), use_container_width=True)
 
             with col4:
                 if judge_metrics:
-                    st.plotly_chart(
-                        horizontal_bar(
-                            {s: judge_metrics[s]["hallucination_free"] for s in judge_metrics},
-                            "Hallucination free — 1.0 = clean, 0.0 = fabricated",
-                            x_max=1.1, height=250
-                        ),
-                        use_container_width=True
-                    )
+                    st.plotly_chart(horizontal_bar(
+                        {s: judge_metrics[s]["hallucination_free"] for s in judge_metrics},
+                        "Hallucination free — 1.0 = clean, 0.0 = fabricated",
+                        x_max=1.1, height=250
+                    ), use_container_width=True)
                 else:
-                    st.plotly_chart(
-                        horizontal_bar(
-                            {s: metrics[s]["avg_latency"] for s in metrics},
-                            "Average latency (seconds)",
-                            x_suffix="s", height=250
-                        ),
-                        use_container_width=True
-                    )
+                    st.plotly_chart(horizontal_bar(
+                        {s: metrics[s]["avg_latency"] for s in metrics},
+                        "Average latency (seconds)", x_suffix="s", height=250
+                    ), use_container_width=True)
 
-            # Raw table
             st.markdown("---")
             st.markdown("#### Raw results")
 
-            col_filter, col_strat_filter = st.columns(2)
-            with col_filter:
-                tier_filter = st.selectbox(
-                    "Filter by tier",
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                tier_filter = st.selectbox("Filter by tier",
                     ["All tiers", "Tier 1 — easy", "Tier 2 — multi-chunk", "Tier 3 — adversarial"],
-                    label_visibility="collapsed"
-                )
-            with col_strat_filter:
-                strat_filter = st.selectbox(
-                    "Filter by strategy",
+                    label_visibility="collapsed")
+            with col_f2:
+                strat_filter = st.selectbox("Filter by strategy",
                     ["All strategies", "naive", "hybrid", "hyde", "reranked"],
-                    label_visibility="collapsed"
-                )
+                    label_visibility="collapsed")
 
-            tier_map = {"Tier 1 — easy": 1, "Tier 2 — multi-chunk": 2, "Tier 3 — adversarial": 3}
+            tier_map   = {"Tier 1 — easy": 1, "Tier 2 — multi-chunk": 2, "Tier 3 — adversarial": 3}
             display_df = df_clean.copy()
             if tier_filter != "All tiers":
                 display_df = display_df[display_df["tier"] == tier_map[tier_filter]]
@@ -565,12 +576,8 @@ with tab_benchmark:
             show_cols = ["question_id", "tier", "strategy", "confidence", "is_answerable", "total_latency"]
             if "top_sources" in display_df.columns:
                 show_cols.append("top_sources")
-
-            st.dataframe(
-                display_df[show_cols].reset_index(drop=True),
-                use_container_width=True,
-                height=300,
-            )
+            st.dataframe(display_df[show_cols].reset_index(drop=True),
+                use_container_width=True, height=300)
 
 
 # =============================================================================
@@ -595,7 +602,7 @@ with tab_sources:
         }
         for q in golden:
             sources = q.get("source_documents", [])
-            placed = False
+            placed  = False
             for s in sources:
                 sl = s.lower()
                 if any(x in sl for x in ["peft","transformers","llm_tutorial","pipeline","tokeniz","training","perf_train","generation","quantization","bitsandbytes","deepspeed","kv_cache"]):
@@ -618,10 +625,8 @@ with tab_sources:
                 labels=list(corpus_groups.keys()),
                 values=list(corpus_groups.values()),
                 marker_colors=[corpus_colors_map[k] for k in corpus_groups],
-                textinfo="label+value",
-                textfont=dict(size=11),
-                hole=0.5,
-                showlegend=False,
+                textinfo="label+value", textfont=dict(size=11),
+                hole=0.5, showlegend=False,
             ))
             fig_pie.update_layout(
                 plot_bgcolor="#16161a", paper_bgcolor="#16161a",
@@ -640,11 +645,9 @@ with tab_sources:
                 columns=["category", "count"]
             )
             fig_cat = go.Figure(go.Bar(
-                y=cats_df["category"], x=cats_df["count"],
-                orientation="h",
+                y=cats_df["category"], x=cats_df["count"], orientation="h",
                 marker_color="rgba(127,119,221,0.3)",
-                marker_line_color="#7f77dd",
-                marker_line_width=0.5,
+                marker_line_color="#7f77dd", marker_line_width=0.5,
             ))
             fig_cat.update_layout(
                 plot_bgcolor="#16161a", paper_bgcolor="#16161a",
@@ -659,7 +662,7 @@ with tab_sources:
         st.markdown("---")
         st.markdown("#### Expected source files")
 
-        expected_sources = {}
+        expected_sources  = {}
         source_groups_map = {}
         for q in golden:
             for s in q.get("source_documents", []):
@@ -687,30 +690,128 @@ with tab_sources:
         for _, row in src_df.iterrows():
             fig_src.add_trace(go.Bar(
                 y=[row["source_file"].split("/")[-1]],
-                x=[row["questions"]],
-                orientation="h",
-                marker_color=row["color"],
-                showlegend=False,
+                x=[row["questions"]], orientation="h",
+                marker_color=row["color"], showlegend=False,
             ))
         fig_src.update_layout(
             plot_bgcolor="#16161a", paper_bgcolor="#16161a",
             font=dict(color="#888", size=10),
             margin=dict(l=0, r=20, t=10, b=0),
             height=max(320, len(src_df) * 22),
-            xaxis=dict(showgrid=False, zeroline=False, dtick=1,
-                       title="questions targeting this file"),
+            xaxis=dict(showgrid=False, zeroline=False, dtick=1, title="questions targeting this file"),
             yaxis=dict(showgrid=False, autorange="reversed"),
         )
         st.plotly_chart(fig_src, use_container_width=True)
 
 
 # =============================================================================
-# TAB 4 — ABOUT
+# TAB 4 — OBSERVABILITY
+# =============================================================================
+
+with tab_obs:
+    st.markdown("### Observability")
+    st.markdown(
+        '<div style="font-size:11px;color:#555;font-family:monospace;margin-bottom:16px;">'
+        'Token usage, cost tracking and request tracing — populated as you use the Query tab'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    obs = load_observability_stats()
+
+    if obs is None:
+        st.markdown(
+            '<div class="warn-box">'
+            'No observability data yet.<br>'
+            'Run a query in the Query tab — data appears here automatically.'
+            '</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        summary = obs["summary"].iloc[0] if len(obs["summary"]) > 0 else {}
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total requests", int(summary.get("total_requests", 0)))
+        c2.metric("Total tokens",   f'{int(summary.get("total_tokens", 0) or 0):,}')
+        c3.metric("Total cost",     f'${float(summary.get("total_cost", 0) or 0):.5f}')
+        c4.metric("Avg latency",    f'{int(summary.get("avg_latency_ms", 0) or 0)}ms')
+
+        st.markdown("")
+
+        per_strategy = obs["per_strategy"]
+
+        if len(per_strategy) > 0:
+            col1, col2 = st.columns(2)
+
+            with col1:
+                fig_tok = go.Figure()
+                for _, row in per_strategy.iterrows():
+                    fig_tok.add_trace(go.Bar(
+                        y=[row["strategy"]],
+                        x=[row["avg_tokens"] or 0],
+                        orientation="h",
+                        marker_color=STRATEGY_COLORS.get(row["strategy"], "#888"),
+                        showlegend=False,
+                        text=[f'{int(row["avg_tokens"] or 0)} tokens'],
+                        textposition="outside",
+                        textfont=dict(size=10, color="#aaa"),
+                    ))
+                fig_tok.update_layout(
+                    plot_bgcolor="#16161a", paper_bgcolor="#16161a",
+                    font=dict(color="#888", size=11),
+                    margin=dict(l=0, r=90, t=36, b=0), height=220,
+                    title=dict(text="Avg tokens per query", font=dict(size=12, color="#666"), x=0),
+                    xaxis=dict(showgrid=False, zeroline=False),
+                    yaxis=dict(showgrid=False),
+                )
+                st.plotly_chart(fig_tok, use_container_width=True)
+
+            with col2:
+                fig_cost = go.Figure()
+                for _, row in per_strategy.iterrows():
+                    avg_cost = float(row["avg_cost"] or 0)
+                    fig_cost.add_trace(go.Bar(
+                        y=[row["strategy"]],
+                        x=[avg_cost],
+                        orientation="h",
+                        marker_color=STRATEGY_COLORS.get(row["strategy"], "#888"),
+                        showlegend=False,
+                        text=[f'${avg_cost:.5f}'],
+                        textposition="outside",
+                        textfont=dict(size=10, color="#aaa"),
+                    ))
+                fig_cost.update_layout(
+                    plot_bgcolor="#16161a", paper_bgcolor="#16161a",
+                    font=dict(color="#888", size=11),
+                    margin=dict(l=0, r=90, t=36, b=0), height=220,
+                    title=dict(text="Avg cost per query (USD)", font=dict(size=12, color="#666"), x=0),
+                    xaxis=dict(showgrid=False, zeroline=False),
+                    yaxis=dict(showgrid=False),
+                )
+                st.plotly_chart(fig_cost, use_container_width=True)
+
+            st.markdown("---")
+            st.markdown("#### Per strategy breakdown")
+            display_cols = ["strategy", "total_requests", "avg_tokens",
+                            "avg_cost", "avg_latency_ms", "avg_confidence", "errors"]
+            available = [c for c in display_cols if c in per_strategy.columns]
+            st.dataframe(per_strategy[available].reset_index(drop=True),
+                use_container_width=True, height=200)
+
+        st.markdown("---")
+        st.markdown("#### Recent requests")
+        if len(obs["recent"]) > 0:
+            st.dataframe(obs["recent"].reset_index(drop=True),
+                use_container_width=True, height=300)
+        else:
+            st.markdown('<div class="info-box">No requests logged yet</div>', unsafe_allow_html=True)
+
+
+# =============================================================================
+# TAB 5 — ABOUT
 # =============================================================================
 
 with tab_about:
-
-    # Hero line
     st.markdown("""
     <div style="padding: 20px 0 24px;">
       <div style="font-size:22px;font-weight:500;color:#cccccc;margin-bottom:6px;">Multi-Strategy RAG Benchmark</div>
@@ -720,13 +821,12 @@ with tab_about:
     </div>
     """, unsafe_allow_html=True)
 
-    # Key numbers
     st.markdown("""
-    <div class="stat-grid" style="margin-bottom:16px;">
-      <div class="stat-box"><div class="stat-num">+31%</div><div class="stat-label">judge score improvement — reranked over naive</div></div>
-      <div class="stat-box"><div class="stat-num">93%</div><div class="stat-label">abstention accuracy — hybrid on adversarial questions</div></div>
-      <div class="stat-box"><div class="stat-num">3x</div><div class="stat-label">parallel speedup — asyncio.gather vs sequential</div></div>
-      <div class="stat-box"><div class="stat-num">30</div><div class="stat-label">golden questions — tiered, hand-crafted benchmark</div></div>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="stat-num">+31%</div><div class="stat-label">judge score — reranked over naive</div></div>
+      <div class="stat-box"><div class="stat-num">93%</div><div class="stat-label">abstention accuracy — hybrid on adversarial</div></div>
+      <div class="stat-box"><div class="stat-num">3x</div><div class="stat-label">parallel speedup — asyncio.gather</div></div>
+      <div class="stat-box"><div class="stat-num">30</div><div class="stat-label">golden questions — tiered benchmark</div></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -765,7 +865,7 @@ with tab_about:
           <div class="about-row"><span class="about-key">keyword</span><span class="about-val">rank_bm25 — 7,123 chunks</span></div>
           <div class="about-row"><span class="about-key">reranker</span><span class="about-val">ms-marco-MiniLM-L-6-v2</span></div>
           <div class="about-row"><span class="about-key">API</span><span class="about-val">FastAPI + asyncio.gather</span></div>
-          <div class="about-row"><span class="about-key">outputs</span><span class="about-val">instructor + pydantic</span></div>
+          <div class="about-row"><span class="about-key">observability</span><span class="about-val">SQLite + token tracking</span></div>
         </div>
         """, unsafe_allow_html=True)
 

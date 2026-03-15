@@ -4,95 +4,73 @@ from loguru import logger
 from groq import Groq
 import instructor
 from app.config import settings
-from app.models import RAGResponse, RAGResult
+from app.models import RAGResponse, RAGResult, TokenUsage, calculate_cost
 from app.ingestion.embedder import Embedder
 from app.retrieval.vector_store import VectorStore
 from app.retrieval.bm25_store import BM25Store
 
 
 class HybridRAG:
-    # Combines BM25 keyword search + vector semantic search
-    # Uses Reciprocal Rank Fusion (RRF) to merge results
-    #
-    # WHY HYBRID BEATS NAIVE:
-    # Naive (vector only): finds semantically similar chunks
-    #   "LoRA rank 16" -> finds chunks about fine-tuning in general
-    # BM25 (keyword only): finds exact term matches
-    #   "LoRA rank 16" -> finds chunks containing "LoRA", "rank", "16"
-    # Hybrid: gets both - semantic AND exact match
-    #
-    # RRF formula: score = 1 / (rank + 60)
-    # A chunk ranked #1 in both lists scores highest
-    # A chunk only in one list scores lower
-    # 60 is a constant that prevents top ranks from dominating
+    # BM25 + vector search combined with Reciprocal Rank Fusion
+    # Beats naive on recall because it catches both semantic and keyword matches
 
     def __init__(self, embedder: Embedder, vector_store: VectorStore, bm25_store: BM25Store):
-        self.embedder = embedder
+        self.embedder     = embedder
         self.vector_store = vector_store
-        self.bm25_store = bm25_store
+        self.bm25_store   = bm25_store
+        self.model        = "llama-3.3-70b-versatile"
         self.client = instructor.from_groq(
             Groq(api_key=settings.groq_api_key),
             mode=instructor.Mode.JSON
         )
         logger.info("HybridRAG initialised")
 
-    def reciprocal_rank_fusion(self, vector_results: List[dict], bm25_results: List[dict], k: int = 60) -> List[dict]:
-        # Merge two ranked lists into one using RRF
-        # k=60 is standard RRF constant from the original paper
-        scores = {}
-        contents = {}
-
-        for rank, result in enumerate(vector_results):
-            doc_id = result["content"][:100]
-            scores[doc_id] = scores.get(doc_id, 0) + 1 / (rank + k)
-            contents[doc_id] = result
-
-        for rank, result in enumerate(bm25_results):
-            doc_id = result["content"][:100]
-            scores[doc_id] = scores.get(doc_id, 0) + 1 / (rank + k)
-            if doc_id not in contents:
-                contents[doc_id] = result
-
-        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
-
-        merged = []
-        for doc_id in sorted_ids:
-            result = contents[doc_id].copy()
-            result["rrf_score"] = round(scores[doc_id], 6)
-            result["retrieval_method"] = "hybrid_rrf"
-            merged.append(result)
-
-        return merged
-
     def retrieve(self, query: str, top_k: int = 5) -> List[dict]:
-        # Get more candidates than needed from each retriever
-        # Then RRF merges and reranks them
         fetch_k = top_k * 2
 
-        # Vector search - semantic similarity
+        # Vector search
         query_embedding = self.embedder.embed_single(query)
-        vector_results = self.vector_store.search(
+        vector_results  = self.vector_store.search(
             query_embedding=query_embedding,
             top_k=fetch_k,
-            strategy_filter="fixed_size"
         )
 
-        # BM25 search - keyword matching
+        # BM25 search
         bm25_results = self.bm25_store.search(query, top_k=fetch_k)
 
-        logger.info("Vector: {} results, BM25: {} results", len(vector_results), len(bm25_results))
+        # Reciprocal Rank Fusion
+        scores = {}
+        k = 60  # RRF constant
 
-        # Merge with RRF
-        merged = self.reciprocal_rank_fusion(vector_results, bm25_results)
+        for rank, chunk in enumerate(vector_results, start=1):
+            cid = chunk.get("id", chunk.get("content", "")[:50])
+            scores[cid] = scores.get(cid, 0) + 1 / (k + rank)
 
-        # Return top_k after fusion
-        return merged[:top_k]
+        for rank, chunk in enumerate(bm25_results, start=1):
+            cid = chunk.get("id", chunk.get("content", "")[:50])
+            scores[cid] = scores.get(cid, 0) + 1 / (k + rank)
 
-    def generate(self, query: str, chunks: List[dict]) -> RAGResponse:
+        # Merge all chunks into one lookup
+        all_chunks = {
+            c.get("id", c.get("content", "")[:50]): c
+            for c in vector_results + bm25_results
+        }
+
+        # Sort by RRF score and return top_k
+        sorted_ids = sorted(scores, key=lambda x: scores[x], reverse=True)
+        results = []
+        for cid in sorted_ids[:top_k]:
+            chunk = all_chunks.get(cid, {})
+            chunk["rrf_score"] = round(scores[cid], 6)
+            results.append(chunk)
+
+        return results
+
+    def generate(self, query: str, chunks: List[dict]) -> tuple:
         context = "\n\n---\n\n".join([c["content"][:800] for c in chunks])
 
-        response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        response, raw = self.client.chat.completions.create_with_completion(
+            model=self.model,
             response_model=RAGResponse,
             max_retries=3,
             messages=[
@@ -117,20 +95,38 @@ class HybridRAG:
                 }
             ]
         )
-        return response
+
+        usage             = raw.usage if hasattr(raw, "usage") and raw.usage else None
+        prompt_tokens     = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        total_tokens      = getattr(usage, "total_tokens", 0) or 0
+        cost              = calculate_cost(self.model, prompt_tokens, completion_tokens)
+
+        token_usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            cost_usd=cost,
+            model=self.model,
+        )
+
+        return response, token_usage
 
     def run(self, query: str, top_k: int = 5) -> RAGResult:
         logger.info("HybridRAG running query: {}", query[:60])
 
-        t0 = time.time()
-        chunks = self.retrieve(query, top_k)
+        t0               = time.time()
+        chunks           = self.retrieve(query, top_k)
         retrieve_latency = round(time.time() - t0, 3)
         logger.info("Retrieved {} chunks in {}s", len(chunks), retrieve_latency)
 
-        t1 = time.time()
-        response = self.generate(query, chunks)
-        generate_latency = round(time.time() - t1, 3)
-        logger.info("Generated answer in {}s", generate_latency)
+        t1                    = time.time()
+        response, token_usage = self.generate(query, chunks)
+        generate_latency      = round(time.time() - t1, 3)
+        logger.info(
+            "Generated answer in {}s — {} tokens — ${:.6f}",
+            generate_latency, token_usage.total_tokens, token_usage.cost_usd,
+        )
 
         total_latency = round(retrieve_latency + generate_latency, 3)
 
@@ -145,47 +141,13 @@ class HybridRAG:
             latency={
                 "retrieve": retrieve_latency,
                 "generate": generate_latency,
-                "total": total_latency
-            }
+                "total":    total_latency,
+            },
+            token_usage=token_usage,
+            cost_usd=token_usage.cost_usd,
         )
 
     async def run_async(self, query: str, top_k: int = 5) -> RAGResult:
         import asyncio
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            self.run,
-            query,
-            top_k
-        )
-        return result
-
-if __name__ == "__main__":
-    from app.ingestion.embedder import Embedder
-    from app.retrieval.vector_store import VectorStore
-    from app.retrieval.bm25_store import BM25Store
-
-    print("Testing HybridRAG standalone...")
-    print()
-
-    embedder = Embedder()
-    vector_store = VectorStore()
-    bm25_store = BM25Store()
-    bm25_store.load_index()
-    rag = HybridRAG(embedder, vector_store, bm25_store)
-
-    # Tier 1 - technical term query where BM25 helps
-    print("=== TIER 1 - Technical term query ===")
-    result = rag.run("What is the rank r in LoRA and how do you choose it?")
-    print("Answer:    ", result.answer[:200])
-    print("Confidence:", result.confidence)
-    print("Answerable:", result.is_answerable)
-    print("Latency:   ", result.latency)
-    print()
-
-    # Tier 3 - adversarial
-    print("=== TIER 3 - Adversarial ===")
-    result2 = rag.run("What did Elon Musk say about RAG systems in 2024?")
-    print("Answer:    ", result2.answer[:200])
-    print("Confidence:", result2.confidence)
-    print("Answerable:", result2.is_answerable)
+        return await loop.run_in_executor(None, self.run, query, top_k)

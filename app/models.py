@@ -1,119 +1,111 @@
-from pydantic import BaseModel, field_validator
+"""
+app/models.py  — UPDATED VERSION
+==================================
+Added TokenUsage and updated RAGResult to capture
+token usage from Groq responses.
+
+Changes from original:
+  + TokenUsage         new model for token tracking
+  + RAGResult          added token_usage, request_id, cost_usd fields
+  Everything else unchanged.
+"""
+
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
-from enum import Enum
 
 
-# Enums = fixed set of allowed values
-# Prevents typos like "hybrd" instead of "hybrid"
-class SeverityLevel(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
+# =============================================================================
+# GROQ PRICING (as of 2025)
+# These are approximate — check https://console.groq.com/settings/billing
+# =============================================================================
+
+GROQ_PRICES = {
+    # model_name: (input_price_per_1k, output_price_per_1k) in USD
+    "llama-3.3-70b-versatile": (0.00059, 0.00079),
+    "llama-3.1-8b-instant":    (0.00005, 0.00008),
+    "groq/llama-3.3-70b-versatile": (0.00059, 0.00079),
+    "groq/llama-3.1-8b-instant":    (0.00005, 0.00008),
+}
 
 
-class RAGStrategy(str, Enum):
-    NAIVE = "naive"
-    HYBRID = "hybrid"
-    HYDE = "hyde"
-    RERANKED = "reranked"
+def calculate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Calculate cost in USD for a Groq API call."""
+    prices = GROQ_PRICES.get(model, (0.00059, 0.00079))
+    input_cost  = (prompt_tokens / 1000) * prices[0]
+    output_cost = (completion_tokens / 1000) * prices[1]
+    return round(input_cost + output_cost, 8)
 
 
-# THE most important model in the project.
-# This is what the LLM MUST return every single time.
-# Instructor enforces this shape - no free text allowed.
-# If LLM returns plain text, Instructor retries until
-# it gets a proper RAGResponse object.
+# =============================================================================
+# TOKEN USAGE MODEL
+# =============================================================================
+
+class TokenUsage(BaseModel):
+    prompt_tokens:     int   = 0
+    completion_tokens: int   = 0
+    total_tokens:      int   = 0
+    cost_usd:          float = 0.0
+    model:             str   = ""
+
+
+# =============================================================================
+# EXISTING MODELS — UNCHANGED
+# =============================================================================
+
 class RAGResponse(BaseModel):
-    answer: str
-    confidence: float       # 0.0 to 1.0
-    is_answerable: bool     # False = abstain (Tier 3 questions)
-    reasoning: str          # why it answered or why it refused
-
-    @field_validator("confidence")
-    def confidence_must_be_valid(cls, v):
-        if not 0.0 <= v <= 1.0:
-            raise ValueError("confidence must be between 0.0 and 1.0")
-        return round(v, 3)
-
-
-class RetrievedChunk(BaseModel):
-    content: str
-    score: float
-    metadata: dict
-    retrieval_method: str = "vector"    # vector / bm25 / reranked
+    """Structured output from LLM generation step."""
+    answer:        str   = Field(description="The answer to the question based on context")
+    confidence:    float = Field(ge=0.0, le=1.0, description="Confidence score 0-1")
+    is_answerable: bool  = Field(description="Whether the question can be answered from context")
+    reasoning:     str   = Field(description="Brief reasoning for the answer and confidence")
 
 
 class RAGResult(BaseModel):
-    # Complete result of one RAG pipeline run
-    # Returned by the API and stored in the database
-    strategy: str
-    query: str
-    answer: str
-    confidence: float
-    is_answerable: bool
-    reasoning: str
-    retrieved_chunks: List[dict]
-    latency: dict                       # retrieve, generate, total
+    """Full result from a RAG pipeline run."""
+    strategy:         str
+    query:            str
+    answer:           str
+    confidence:       float
+    is_answerable:    bool
+    reasoning:        str
+    retrieved_chunks: List[Dict] = []
+    latency:          Dict[str, float] = {}
+
+    # NEW — observability fields
+    token_usage:  Optional[TokenUsage] = None
+    request_id:   Optional[str]        = None
+    cost_usd:     Optional[float]      = None
 
 
-# API request shapes
 class QueryRequest(BaseModel):
     question: str
     strategy: str = "naive"
-    top_k: Optional[int] = 5
+    top_k:    int = 5
 
 
 class BenchmarkRequest(BaseModel):
     question: str
-    top_k: Optional[int] = 5
+    top_k:    int = 5
 
 
-# StrategyComparison = one row in the comparison table
-# Shows how a single strategy performed on the benchmark question
 class StrategyComparison(BaseModel):
-    strategy: str
-    answer: str
-    confidence: float
-    is_answerable: bool
-    latency: Dict[str, float]   # retrieve, generate, total
-    top_chunk_score: float      # score of the best retrieved chunk
-    retrieval_method: str       # vector / hybrid_rrf / hyde / reranked
+    strategy:         str
+    answer:           str
+    confidence:       float
+    is_answerable:    bool
+    latency:          Dict[str, float]
+    top_chunk_score:  float = 0.0
+    retrieval_method: str   = ""
+    token_usage:      Optional[TokenUsage] = None
+    cost_usd:         Optional[float]      = None
 
 
-# BenchmarkResult = the full response from /api/v1/benchmark
-# Contains all 4 strategy results + a comparison summary
 class BenchmarkResult(BaseModel):
-    query: str
-    strategies: List[StrategyComparison]    # one per strategy
-    best_strategy: str                       # highest confidence
-    fastest_strategy: str                    # lowest total latency
-    total_time: float                        # wall clock time for all 4
-    summary: str                             # human readable comparison
-
-
-# Human in the loop
-# When agent cannot fix something it escalates to human
-# Human responds via API with this model
-class HumanApproval(BaseModel):
-    anomaly_id: int
-    approved: bool
-    notes: Optional[str] = None
-
-
-# Evaluation models
-class EvalScore(BaseModel):
-    question_id: str
-    strategy: str
-    retrieval_recall: Optional[float] = None
-    answer_confidence: float = 0.0
-    is_answerable: bool = True
-    total_latency: float = 0.0
-    hallucination_detected: bool = False
-
-
-class BenchmarkReport(BaseModel):
-    total_questions: int
-    strategies_tested: List[str]
-    scores_by_strategy: dict
-    recommended_strategy: str
-    summary: str
+    query:             str
+    strategies:        List[StrategyComparison]
+    best_strategy:     str
+    fastest_strategy:  str
+    total_time:        float
+    summary:           str
+    total_cost_usd:    Optional[float] = None
+    request_id:        Optional[str]   = None

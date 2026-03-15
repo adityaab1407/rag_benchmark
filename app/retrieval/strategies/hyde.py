@@ -4,106 +4,93 @@ from loguru import logger
 from groq import Groq
 import instructor
 from app.config import settings
-from app.models import RAGResponse, RAGResult
+from app.models import RAGResponse, RAGResult, TokenUsage, calculate_cost
 from app.ingestion.embedder import Embedder
 from app.retrieval.vector_store import VectorStore
 
 
 class HyDeRAG:
     # Hypothetical Document Embeddings
-    #
-    # THE PROBLEM WITH NAIVE RAG:
-    # Query: "What is LoRA?"
-    # Query embedding lives in "question space"
-    # Document chunks live in "answer space"
-    # These spaces don't perfectly overlap
-    # So vector similarity is imperfect
-    #
-    # THE HYDE INSIGHT:
-    # Instead of embedding the question, generate a
-    # hypothetical answer first, then embed THAT
-    # "LoRA is a parameter efficient fine-tuning method..."
-    # This hypothetical answer lives in "answer space"
-    # Much closer to real document chunks
-    # Better retrieval on complex questions
-    #
-    # TWO Groq calls per query:
-    # Call 1: generate hypothetical answer (no retrieval)
-    # Call 2: generate real answer from retrieved chunks
+    # Step 1: Ask LLM to generate a hypothetical answer to the question
+    # Step 2: Embed that hypothetical answer (not the original query)
+    # Step 3: Use that embedding to search — finds chunks similar to a good answer
+    # Makes 2 Groq calls per query — both tracked for cost
 
     def __init__(self, embedder: Embedder, vector_store: VectorStore):
-        self.embedder = embedder
+        self.embedder     = embedder
         self.vector_store = vector_store
+        self.model        = "llama-3.3-70b-versatile"
         self.client = instructor.from_groq(
             Groq(api_key=settings.groq_api_key),
             mode=instructor.Mode.JSON
         )
         logger.info("HyDeRAG initialised")
 
-    def generate_hypothesis(self, query: str) -> str:
-        # Call 1 - generate a hypothetical answer
-        # No retrieval yet - just ask the LLM to imagine an answer
-        # We embed THIS instead of the original query
-        from pydantic import BaseModel
+    def generate_hypothesis(self, query: str) -> tuple:
+        """
+        Call 1: Generate a hypothetical answer.
+        Returns (hypothesis_text, TokenUsage)
+        """
+        # Use raw Groq client so we can access usage
+        from groq import Groq as RawGroq
+        raw_client = RawGroq(api_key=settings.groq_api_key)
 
-        class Hypothesis(BaseModel):
-            hypothetical_answer: str
+        raw = raw_client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful assistant. Generate a short, factual, "
+                        "hypothetical answer to the question as if you had perfect "
+                        "knowledge. This will be used to improve document retrieval. "
+                        "Be specific and technical. 2-3 sentences max."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"Question: {query}\n\nGenerate a hypothetical answer:"
+                }
+            ],
+            max_tokens=200,
+        )
 
-        try:
-            response = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                response_model=Hypothesis,
-                max_retries=3,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Generate a hypothetical passage that would answer "
-                            "the question if it existed in a technical document. "
-                            "Write 2-3 sentences as if from a research paper or documentation. "
-                            "Be specific and technical."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": "Question: {}".format(query)
-                    }
-                ]
-            )
-            hypothesis = response.hypothetical_answer
-            logger.info("Hypothesis generated: {}...", hypothesis[:80])
-            return hypothesis
+        hypothesis = raw.choices[0].message.content or ""
 
-        except Exception as e:
-            logger.warning("Hypothesis generation failed: {} - falling back to query", e)
-            return query
+        usage             = raw.usage if hasattr(raw, "usage") and raw.usage else None
+        prompt_tokens     = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        cost              = calculate_cost(self.model, prompt_tokens, completion_tokens)
 
-    def retrieve(self, query: str, top_k: int = 5) -> List[dict]:
-        # Generate hypothesis then embed it
-        hypothesis = self.generate_hypothesis(query)
+        token_usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            cost_usd=cost,
+            model=self.model,
+        )
 
-        # Embed the hypothesis not the original query
+        logger.info("Hypothesis generated: {}", hypothesis[:80])
+        return hypothesis, token_usage
+
+    def retrieve(self, hypothesis: str, top_k: int = 5) -> List[dict]:
+        """Embed the hypothesis and search for similar chunks."""
         hypothesis_embedding = self.embedder.embed_single(hypothesis)
-
         results = self.vector_store.search(
             query_embedding=hypothesis_embedding,
             top_k=top_k,
-            strategy_filter="fixed_size"
         )
-
-        # Tag chunks with retrieval method
-        for r in results:
-            r["retrieval_method"] = "hyde"
-
         return results
 
-    def generate(self, query: str, chunks: List[dict]) -> RAGResponse:
-        # Call 2 - generate real answer from retrieved chunks
-        # Same as naive from here - only retrieval step was different
+    def generate(self, query: str, chunks: List[dict]) -> tuple:
+        """
+        Call 2: Generate final answer from retrieved chunks.
+        Returns (RAGResponse, TokenUsage)
+        """
         context = "\n\n---\n\n".join([c["content"][:800] for c in chunks])
 
-        response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        response, raw = self.client.chat.completions.create_with_completion(
+            model=self.model,
             response_model=RAGResponse,
             max_retries=3,
             messages=[
@@ -128,20 +115,58 @@ class HyDeRAG:
                 }
             ]
         )
-        return response
+
+        usage             = raw.usage if hasattr(raw, "usage") and raw.usage else None
+        prompt_tokens     = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        cost              = calculate_cost(self.model, prompt_tokens, completion_tokens)
+
+        token_usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            cost_usd=cost,
+            model=self.model,
+        )
+
+        return response, token_usage
 
     def run(self, query: str, top_k: int = 5) -> RAGResult:
         logger.info("HyDeRAG running query: {}", query[:60])
 
         t0 = time.time()
-        chunks = self.retrieve(query, top_k)
-        retrieve_latency = round(time.time() - t0, 3)
-        logger.info("Retrieved {} chunks in {}s (includes hypothesis generation)", len(chunks), retrieve_latency)
 
+        # Call 1 — generate hypothesis
+        hypothesis, hypothesis_tokens = self.generate_hypothesis(query)
+
+        # Retrieve using hypothesis embedding
+        chunks = self.retrieve(hypothesis, top_k)
+        retrieve_latency = round(time.time() - t0, 3)
+        logger.info(
+            "Retrieved {} chunks in {}s (includes hypothesis generation)",
+            len(chunks), retrieve_latency
+        )
+
+        # Call 2 — generate final answer
         t1 = time.time()
-        response = self.generate(query, chunks)
+        response, generation_tokens = self.generate(query, chunks)
         generate_latency = round(time.time() - t1, 3)
-        logger.info("Generated answer in {}s", generate_latency)
+
+        # Sum token usage from BOTH calls
+        total_token_usage = TokenUsage(
+            prompt_tokens=hypothesis_tokens.prompt_tokens + generation_tokens.prompt_tokens,
+            completion_tokens=hypothesis_tokens.completion_tokens + generation_tokens.completion_tokens,
+            total_tokens=hypothesis_tokens.total_tokens + generation_tokens.total_tokens,
+            cost_usd=round(hypothesis_tokens.cost_usd + generation_tokens.cost_usd, 8),
+            model=self.model,
+        )
+
+        logger.info(
+            "Generated answer in {}s — {} tokens total (2 calls) — ${:.6f}",
+            generate_latency,
+            total_token_usage.total_tokens,
+            total_token_usage.cost_usd,
+        )
 
         total_latency = round(retrieve_latency + generate_latency, 3)
 
@@ -156,44 +181,13 @@ class HyDeRAG:
             latency={
                 "retrieve": retrieve_latency,
                 "generate": generate_latency,
-                "total": total_latency
-            }
+                "total":    total_latency,
+            },
+            token_usage=total_token_usage,
+            cost_usd=total_token_usage.cost_usd,
         )
 
     async def run_async(self, query: str, top_k: int = 5) -> RAGResult:
         import asyncio
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            self.run,
-            query,
-            top_k
-        )
-        return result
-
-if __name__ == "__main__":
-    from app.ingestion.embedder import Embedder
-    from app.retrieval.vector_store import VectorStore
-
-    print("Testing HyDeRAG standalone...")
-    print()
-
-    embedder = Embedder()
-    vector_store = VectorStore()
-    rag = HyDeRAG(embedder, vector_store)
-
-    # Tier 2 - complex question where HyDE should shine
-    print("=== TIER 2 - Complex question ===")
-    result = rag.run("How does attention mechanism scale with sequence length and what are the memory implications?")
-    print("Answer:    ", result.answer[:200])
-    print("Confidence:", result.confidence)
-    print("Answerable:", result.is_answerable)
-    print("Latency:   ", result.latency)
-    print()
-
-    # Tier 3 - adversarial
-    print("=== TIER 3 - Adversarial ===")
-    result2 = rag.run("What did Elon Musk say about RAG systems in 2024?")
-    print("Answer:    ", result2.answer[:200])
-    print("Confidence:", result2.confidence)
-    print("Answerable:", result2.is_answerable)
+        return await loop.run_in_executor(None, self.run, query, top_k)

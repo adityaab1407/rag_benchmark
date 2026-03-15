@@ -1,32 +1,42 @@
+"""
+app/retrieval/strategies/naive.py — UPDATED VERSION
+=====================================================
+Changes from original:
+  + Captures token usage from Groq response
+  + Calculates cost per query
+  + Returns TokenUsage in RAGResult
+
+Same pattern applies to hybrid.py, hyde.py, reranked.py
+Only the generate() method changes.
+"""
+
 import time
 from typing import List
 from loguru import logger
 from groq import Groq
 import instructor
 from app.config import settings
-from app.models import RAGResponse, RAGResult
+from app.models import RAGResponse, RAGResult, TokenUsage, calculate_cost
 from app.ingestion.embedder import Embedder
 from app.retrieval.vector_store import VectorStore
 
 
 class NaiveRAG:
-    # Simplest possible RAG pipeline
-    # Fixed-size chunks + vector search + Groq generation
-    # This is the BASELINE - everything else is measured against this
 
     def __init__(self, embedder: Embedder, vector_store: VectorStore):
-        self.embedder = embedder
+        self.embedder     = embedder
         self.vector_store = vector_store
+        self.model        = "llama-3.3-70b-versatile"
+
+        # Keep raw Groq client so we can access usage from response
+        self.groq_client = Groq(api_key=settings.groq_api_key)
         self.client = instructor.from_groq(
-            Groq(api_key=settings.groq_api_key),
+            self.groq_client,
             mode=instructor.Mode.JSON
         )
         logger.info("NaiveRAG initialised")
 
     def retrieve(self, query: str, top_k: int = 5) -> List[dict]:
-        # Step 1 - embed the query (same model as chunks)
-        # Step 2 - find top_k most similar chunks in Qdrant
-        # strategy_filter="fixed_size" = only search naive RAG chunks
         query_embedding = self.embedder.embed_single(query)
         results = self.vector_store.search(
             query_embedding=query_embedding,
@@ -35,14 +45,16 @@ class NaiveRAG:
         )
         return results
 
-    def generate(self, query: str, chunks: List[dict]) -> RAGResponse:
-        # Build context from retrieved chunks
+    def generate(self, query: str, chunks: List[dict]) -> tuple[RAGResponse, TokenUsage]:
+        """
+        Returns (RAGResponse, TokenUsage) tuple.
+        TokenUsage captures prompt/completion tokens and cost.
+        """
         context = "\n\n---\n\n".join([c["content"][:800] for c in chunks])
 
-        # Instructor forces Groq to return a RAGResponse object
-        # If Groq returns plain text, Instructor retries automatically
-        response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        # Use instructor with_raw_response to capture usage
+        response, raw = self.client.chat.completions.create_with_completion(
+            model=self.model,
             response_model=RAGResponse,
             max_retries=3,
             messages=[
@@ -67,23 +79,41 @@ class NaiveRAG:
                 }
             ]
         )
-        return response
+
+        # Extract token usage from raw completion
+        usage = raw.usage if hasattr(raw, "usage") and raw.usage else None
+        prompt_tokens     = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        total_tokens      = getattr(usage, "total_tokens", 0) or 0
+        cost              = calculate_cost(self.model, prompt_tokens, completion_tokens)
+
+        token_usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            cost_usd=cost,
+            model=self.model,
+        )
+
+        return response, token_usage
 
     def run(self, query: str, top_k: int = 5) -> RAGResult:
-        # Full pipeline with timing at each step
         logger.info("NaiveRAG running query: {}", query[:60])
 
-        # Time the retrieve step
-        t0 = time.time()
+        t0     = time.time()
         chunks = self.retrieve(query, top_k)
         retrieve_latency = round(time.time() - t0, 3)
         logger.info("Retrieved {} chunks in {}s", len(chunks), retrieve_latency)
 
-        # Time the generate step
-        t1 = time.time()
-        response = self.generate(query, chunks)
-        generate_latency = round(time.time() - t1, 3)
-        logger.info("Generated answer in {}s", generate_latency)
+        t1                          = time.time()
+        response, token_usage       = self.generate(query, chunks)
+        generate_latency            = round(time.time() - t1, 3)
+        logger.info(
+            "Generated answer in {}s — {} tokens — ${:.6f}",
+            generate_latency,
+            token_usage.total_tokens,
+            token_usage.cost_usd,
+        )
 
         total_latency = round(retrieve_latency + generate_latency, 3)
 
@@ -98,49 +128,39 @@ class NaiveRAG:
             latency={
                 "retrieve": retrieve_latency,
                 "generate": generate_latency,
-                "total": total_latency
-            }
+                "total":    total_latency,
+            },
+            token_usage=token_usage,
+            cost_usd=token_usage.cost_usd,
         )
-    
+
     async def run_async(self, query: str, top_k: int = 5) -> RAGResult:
-        # Wraps the sync run() method for async/concurrent execution
-        # run_in_executor runs sync code in a thread pool
-        # This frees the FastAPI event loop to handle other tasks
-        # while waiting for Groq to respond
         import asyncio
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,       # None = use default thread pool
-            self.run,   # sync function to run
-            query,      # arg 1
-            top_k       # arg 2
-        )
-        return result
+        return await loop.run_in_executor(None, self.run, query, top_k)
 
-if __name__ == "__main__":
-    from app.ingestion.embedder import Embedder
-    from app.retrieval.vector_store import VectorStore
 
-    print("Testing NaiveRAG standalone...")
-    print()
-
-    embedder = Embedder()
-    vector_store = VectorStore()
-    rag = NaiveRAG(embedder, vector_store)
-
-    # Tier 1 - should answer confidently
-    print("=== TIER 1 - Easy question ===")
-    result = rag.run("What is LoRA and how does it reduce trainable parameters?")
-    print("Answer:      ", result.answer[:200])
-    print("Confidence:  ", result.confidence)
-    print("Answerable:  ", result.is_answerable)
-    print("Latency:     ", result.latency)
-    print()
-
-    # Tier 3 - should abstain
-    print("=== TIER 3 - Adversarial question ===")
-    result2 = rag.run("What did Elon Musk say about RAG systems in 2024?")
-    print("Answer:      ", result2.answer[:200])
-    print("Confidence:  ", result2.confidence)
-    print("Answerable:  ", result2.is_answerable)
-    print("Reasoning:   ", result2.reasoning[:200])
+# =============================================================================
+# SAME PATTERN FOR OTHER STRATEGIES
+# In hybrid.py, hyde.py, reranked.py:
+#
+# 1. Add self.model = "llama-3.3-70b-versatile" in __init__
+#
+# 2. Change generate() signature to return tuple:
+#    def generate(...) -> tuple[RAGResponse, TokenUsage]:
+#
+# 3. Change create() to create_with_completion():
+#    response, raw = self.client.chat.completions.create_with_completion(...)
+#
+# 4. Extract usage same way as above
+#
+# 5. Update run() to unpack tuple:
+#    response, token_usage = self.generate(query, chunks)
+#
+# 6. Add token_usage and cost_usd to RAGResult()
+#
+# NOTE: hyde.py makes 2 LLM calls (hypothesis + generation)
+#       Capture usage from BOTH and sum them:
+#       total_tokens = hypothesis_tokens + generation_tokens
+#       total_cost   = hypothesis_cost + generation_cost
+# =============================================================================

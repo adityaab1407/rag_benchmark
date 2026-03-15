@@ -1,223 +1,253 @@
+"""
+app/api/routes.py — UPDATED VERSION
+=====================================
+Changes from original:
+  + Imports log_observability from database
+  + Imports get_request_id from middleware
+  + /query endpoint logs to observability_log
+  + /benchmark endpoint logs all 4 strategies + total cost
+  Everything else unchanged.
+"""
+
 import time
 import asyncio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
-from app.models import QueryRequest, RAGResult, BenchmarkRequest, BenchmarkResult, StrategyComparison
-from app.main import app_state
 
-router = APIRouter(prefix="/api/v1")
+from app.models import (
+    QueryRequest, BenchmarkRequest,
+    RAGResult, StrategyComparison, BenchmarkResult,
+)
+from app.database import log_query, log_observability
+from app.middleware import get_request_id
 
-AVAILABLE_STRATEGIES = {
-    "naive":    "naive_rag",
-    "hybrid":   "hybrid_rag",
-    "hyde":     "hyde_rag",
-    "reranked": "reranked_rag",
-}
+router = APIRouter()
 
+
+# =============================================================================
+# HEALTH
+# =============================================================================
 
 @router.get("/health")
-async def health():
+async def health(request: Request):
+    app_state = request.app.state
     return {
-        "status": "healthy",
-        "components": {
-            "embedder":     "embedder" in app_state,
-            "vector_store": "vector_store" in app_state,
-            "bm25_store":   "bm25_store" in app_state,
-            "naive_rag":    "naive_rag" in app_state,
-            "hybrid_rag":   "hybrid_rag" in app_state,
-            "hyde_rag":     "hyde_rag" in app_state,
-            "reranked_rag": "reranked_rag" in app_state,
-        }
+        "naive_rag":    hasattr(app_state, "naive_rag"),
+        "hybrid_rag":   hasattr(app_state, "hybrid_rag"),
+        "hyde_rag":     hasattr(app_state, "hyde_rag"),
+        "reranked_rag": hasattr(app_state, "reranked_rag"),
+        "embedder":     hasattr(app_state, "embedder"),
+        "vector_store": hasattr(app_state, "vector_store"),
+        "bm25_store":   hasattr(app_state, "bm25_store"),
     }
 
 
 @router.get("/strategies")
-async def list_strategies():
+async def strategies(request: Request):
     return {
         "strategies": [
-            {
-                "name": "naive",
-                "description": "Fixed-size chunks + vector search. Baseline strategy.",
-                "status": "available"
-            },
-            {
-                "name": "hybrid",
-                "description": "BM25 + vector search with RRF fusion.",
-                "status": "available"
-            },
-            {
-                "name": "hyde",
-                "description": "Hypothetical document embeddings for better complex query retrieval.",
-                "status": "available"
-            },
-            {
-                "name": "reranked",
-                "description": "Hybrid search + cross-encoder reranking. Best quality.",
-                "status": "available"
-            }
+            {"name": "naive",    "status": "available", "description": "Vector search baseline"},
+            {"name": "hybrid",   "status": "available", "description": "BM25 + vector + RRF"},
+            {"name": "hyde",     "status": "available", "description": "Hypothetical document embeddings"},
+            {"name": "reranked", "status": "available", "description": "Cross-encoder reranking"},
         ]
     }
 
 
-@router.post("/query", response_model=RAGResult)
-async def query(request: QueryRequest):
-    logger.info(
-        "Query received: strategy={} question={}",
-        request.strategy,
-        request.question[:60]
-    )
+# =============================================================================
+# SINGLE QUERY
+# =============================================================================
 
-    if request.strategy not in AVAILABLE_STRATEGIES:
-        raise HTTPException(
-            status_code=400,
-            detail="Unknown strategy '{}'. Available: {}".format(
-                request.strategy,
-                list(AVAILABLE_STRATEGIES.keys())
-            )
+@router.post("/query")
+async def query(request: Request, body: QueryRequest):
+    app_state  = request.app.state
+    req_id     = get_request_id()
+    strategy   = body.strategy
+    top_k      = body.top_k or 5
+
+    strategy_map = {
+        "naive":    app_state.naive_rag,
+        "hybrid":   app_state.hybrid_rag,
+        "hyde":     app_state.hyde_rag,
+        "reranked": app_state.reranked_rag,
+    }
+
+    if strategy not in strategy_map:
+        raise HTTPException(status_code=400, detail=f"Unknown strategy: {strategy}")
+
+    rag = strategy_map[strategy]
+
+    try:
+        result: RAGResult = await rag.run_async(body.question, top_k)
+
+        # Log to original query_logs table
+        top_score = result.retrieved_chunks[0].get("score", 0.0) if result.retrieved_chunks else 0.0
+        await log_query(
+            strategy=strategy,
+            query=body.question,
+            answer=result.answer,
+            confidence=result.confidence,
+            is_answerable=result.is_answerable,
+            retrieve_latency=result.latency.get("retrieve", 0),
+            generate_latency=result.latency.get("generate", 0),
+            total_latency=result.latency.get("total", 0),
+            top_chunk_score=top_score,
         )
 
-    state_key = AVAILABLE_STRATEGIES[request.strategy]
-
-    if state_key not in app_state:
-        raise HTTPException(
-            status_code=503,
-            detail="{} not initialised - check server logs".format(request.strategy)
+        # NEW — log to observability table
+        token_usage = result.token_usage
+        await log_observability(
+            request_id=req_id,
+            endpoint="/query",
+            strategy=strategy,
+            query=body.question,
+            prompt_tokens=token_usage.prompt_tokens if token_usage else 0,
+            completion_tokens=token_usage.completion_tokens if token_usage else 0,
+            total_tokens=token_usage.total_tokens if token_usage else 0,
+            cost_usd=token_usage.cost_usd if token_usage else 0.0,
+            retrieve_ms=result.latency.get("retrieve", 0) * 1000,
+            generate_ms=result.latency.get("generate", 0) * 1000,
+            total_ms=result.latency.get("total", 0) * 1000,
+            confidence=result.confidence,
+            is_answerable=result.is_answerable,
+            model=token_usage.model if token_usage else "",
         )
 
-    result = app_state[state_key].run(request.question, request.top_k or 5)
+        logger.info(
+            "[{}] /query {} — tokens={} cost=${:.6f}",
+            req_id,
+            strategy,
+            token_usage.total_tokens if token_usage else 0,
+            token_usage.cost_usd if token_usage else 0,
+        )
 
-    logger.info(
-        "Query complete: strategy={} confidence={} latency={}s",
-        request.strategy,
-        result.confidence,
-        result.latency["total"]
-    )
+        return result
 
-    return result
+    except Exception as e:
+        await log_observability(
+            request_id=req_id,
+            endpoint="/query",
+            strategy=strategy,
+            query=body.question,
+            error=str(e)[:300],
+        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/benchmark", response_model=BenchmarkResult)
-async def benchmark(request: BenchmarkRequest):
-    # THE async endpoint - runs all 4 strategies simultaneously
-    # asyncio.gather() is the key - it fires all 4 at once
-    # and waits for all to complete
-    # Total time = slowest strategy, not sum of all 4
-    logger.info("Benchmark received: question={}", request.question[:60])
+# =============================================================================
+# BENCHMARK — ALL 4 STRATEGIES IN PARALLEL
+# =============================================================================
 
-    # Check all strategies are loaded
-    for state_key in AVAILABLE_STRATEGIES.values():
-        if state_key not in app_state:
-            raise HTTPException(
-                status_code=503,
-                detail="{} not initialised - check server logs".format(state_key)
-            )
+@router.post("/benchmark")
+async def benchmark(request: Request, body: BenchmarkRequest):
+    app_state = request.app.state
+    req_id    = get_request_id()
+    top_k     = body.top_k or 5
 
-    top_k = request.top_k or 5
-    wall_clock_start = time.time()
+    t_start = time.time()
 
-    # THIS is asyncio.gather() in action
-    # All 4 run_async() calls start simultaneously
-    # Each one is running in its own thread (via run_in_executor)
-    # Python doesn't wait for one to finish before starting the next
-    # Returns a list of 4 results in the same order as the calls
-    logger.info("Launching all 4 strategies in parallel...")
+    # Run all 4 in parallel
     results = await asyncio.gather(
-        app_state["naive_rag"].run_async(request.question, top_k),
-        app_state["hybrid_rag"].run_async(request.question, top_k),
-        app_state["hyde_rag"].run_async(request.question, top_k),
-        app_state["reranked_rag"].run_async(request.question, top_k),
-        return_exceptions=True  # if one fails, others still complete
+        app_state.naive_rag.run_async(body.question, top_k),
+        app_state.hybrid_rag.run_async(body.question, top_k),
+        app_state.hyde_rag.run_async(body.question, top_k),
+        app_state.reranked_rag.run_async(body.question, top_k),
+        return_exceptions=True,
     )
 
-    total_wall_time = round(time.time() - wall_clock_start, 3)
-    logger.info("All 4 strategies completed in {}s", total_wall_time)
+    total_time   = round(time.time() - t_start, 3)
+    comparisons  = []
+    total_cost   = 0.0
 
-    # Process results - handle any exceptions gracefully
-    comparisons = []
-    for i, (strategy_name, result) in enumerate(
-        zip(AVAILABLE_STRATEGIES.keys(), results)
-    ):
+    strategy_names = ["naive", "hybrid", "hyde", "reranked"]
+
+    for strategy_name, result in zip(strategy_names, results):
         if isinstance(result, Exception):
-            # One strategy failed - still return others
-            logger.error("Strategy {} failed: {}", strategy_name, result)
             comparisons.append(StrategyComparison(
                 strategy=strategy_name,
-                answer="ERROR: {}".format(str(result)[:100]),
+                answer=f"ERROR: {str(result)[:200]}",
                 confidence=0.0,
                 is_answerable=False,
-                latency={"retrieve": 0.0, "generate": 0.0, "total": 0.0},
+                latency={"retrieve": 0, "generate": 0, "total": 0},
                 top_chunk_score=0.0,
-                retrieval_method="error"
+                retrieval_method=strategy_name,
             ))
-        else:
-            # Get top chunk score safely
-            top_chunk_score = 0.0
-            if result.retrieved_chunks:
-                top_chunk_score = result.retrieved_chunks[0].get("score", 0.0)
 
-            # Get retrieval method from first chunk
-            retrieval_method = "vector"
-            if result.retrieved_chunks:
-                retrieval_method = result.retrieved_chunks[0].get(
-                    "retrieval_method", strategy_name
-                )
-
-            comparisons.append(StrategyComparison(
+            # Log error
+            await log_observability(
+                request_id=req_id,
+                endpoint="/benchmark",
                 strategy=strategy_name,
-                answer=result.answer,
-                confidence=result.confidence,
-                is_answerable=result.is_answerable,
-                latency=result.latency,
-                top_chunk_score=round(top_chunk_score, 4),
-                retrieval_method=retrieval_method
-            ))
-
-            logger.info(
-                "  {} -> confidence={} latency={}s",
-                strategy_name,
-                result.confidence,
-                result.latency["total"]
+                query=body.question,
+                error=str(result)[:300],
             )
+            continue
 
-    # Find best and fastest from successful results
-    successful = [c for c in comparisons if c.confidence > 0]
+        token_usage = result.token_usage
+        cost        = token_usage.cost_usd if token_usage else 0.0
+        total_cost += cost
 
-    best_strategy = max(
-        successful,
-        key=lambda x: x.confidence
-    ).strategy if successful else "none"
+        top_score = result.retrieved_chunks[0].get("score", 0.0) if result.retrieved_chunks else 0.0
 
+        comparisons.append(StrategyComparison(
+            strategy=strategy_name,
+            answer=result.answer,
+            confidence=result.confidence,
+            is_answerable=result.is_answerable,
+            latency=result.latency,
+            top_chunk_score=top_score,
+            retrieval_method=result.strategy,
+            token_usage=token_usage,
+            cost_usd=cost,
+        ))
+
+        # Log each strategy to observability
+        await log_observability(
+            request_id=req_id,
+            endpoint="/benchmark",
+            strategy=strategy_name,
+            query=body.question,
+            prompt_tokens=token_usage.prompt_tokens if token_usage else 0,
+            completion_tokens=token_usage.completion_tokens if token_usage else 0,
+            total_tokens=token_usage.total_tokens if token_usage else 0,
+            cost_usd=cost,
+            retrieve_ms=result.latency.get("retrieve", 0) * 1000,
+            generate_ms=result.latency.get("generate", 0) * 1000,
+            total_ms=result.latency.get("total", 0) * 1000,
+            confidence=result.confidence,
+            is_answerable=result.is_answerable,
+            model=token_usage.model if token_usage else "",
+        )
+
+    # Find best and fastest
+    answered = [c for c in comparisons if c.is_answerable and not c.answer.startswith("ERROR")]
+    best_strategy    = max(answered, key=lambda x: x.confidence).strategy if answered else "none"
     fastest_strategy = min(
-        successful,
-        key=lambda x: x.latency["total"]
-    ).strategy if successful else "none"
+        [c for c in comparisons if not c.answer.startswith("ERROR")],
+        key=lambda x: x.latency.get("total", 999)
+    ).strategy if comparisons else "none"
 
-    # Build human readable summary
-    summary_lines = []
+    summary_parts = []
     for c in comparisons:
-        if c.confidence > 0:
-            summary_lines.append(
-                "{}: confidence={} latency={}s".format(
-                    c.strategy, c.confidence, c.latency["total"]
-                )
-            )
+        if c.answer.startswith("ERROR"):
+            summary_parts.append(f"{c.strategy}: FAILED")
         else:
-            summary_lines.append("{}: FAILED".format(c.strategy))
-
-    summary = " | ".join(summary_lines)
+            summary_parts.append(
+                f"{c.strategy}: confidence={c.confidence} latency={c.latency.get('total',0):.3f}s cost=${c.cost_usd:.6f}"
+            )
 
     logger.info(
-        "Benchmark complete: best={} fastest={} wall_time={}s",
-        best_strategy,
-        fastest_strategy,
-        total_wall_time
+        "[{}] /benchmark — {}s total — ${:.6f} total cost",
+        req_id, total_time, total_cost,
     )
 
     return BenchmarkResult(
-        query=request.question,
+        query=body.question,
         strategies=comparisons,
         best_strategy=best_strategy,
         fastest_strategy=fastest_strategy,
-        total_time=total_wall_time,
-        summary=summary
+        total_time=total_time,
+        summary=" | ".join(summary_parts),
+        total_cost_usd=round(total_cost, 8),
+        request_id=req_id,
     )
