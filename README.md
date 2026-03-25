@@ -10,13 +10,7 @@ Most RAG systems ship without evaluation. This platform benchmarks four retrieva
 
 ![Query tab — all 4 strategies running in parallel](assets/query.png)
 
-<summary>Benchmark results & Observability</summary>
-
-![Benchmark results — abstention, calibration, judge scores](assets/benchmark.png)
-
-![Observability — token usage and cost per strategy](assets/observability.png)
-
-[▶ Watch demo](https://youtu.be/omcvvyd8DJ8)
+[▶ Watch demo](https://youtu.be/WkCrdAvET4s)
 
 ---
 
