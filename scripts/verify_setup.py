@@ -26,6 +26,7 @@ def verify():
 
     check("Qdrant storage folder", Path("./qdrant_storage").exists(), "(./qdrant_storage/)")
 
+    store = None
     try:
         store = VectorStore()
         count = store.count()
@@ -65,7 +66,8 @@ def verify():
         from app.ingestion.embedder import Embedder
         embedder = Embedder()
         embedding = embedder.embed_single("what is LoRA")
-        store = VectorStore()
+        if store is None:
+            store = VectorStore()
         results = store.search(embedding, top_k=3)
         check("Qdrant search works", len(results) > 0, "({} results)".format(len(results)))
     except Exception as e:

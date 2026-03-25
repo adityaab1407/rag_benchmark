@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app code
 COPY app/ ./app/
-COPY data/ ./data/
+COPY data/golden_dataset.json ./data/
 
 # Pre-download embedding models at build time
 # Avoids slow startup on first run

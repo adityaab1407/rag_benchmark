@@ -22,7 +22,7 @@ class RerankedRAG:
         self.embedder     = embedder
         self.vector_store = vector_store
         self.bm25_store   = bm25_store
-        self.model        = "llama-3.3-70b-versatile"
+        self.model        = "qwen/qwen3-32b"
 
         logger.info("Loading cross-encoder model...")
         self.cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
@@ -95,10 +95,10 @@ class RerankedRAG:
                 {
                     "role": "user",
                     "content": (
-                        "Context:\n{}\n\n"
-                        "Question: {}\n\n"
-                        "Answer the question using only the context above."
-                    ).format(context, query)
+                        f"<context>\n{context}\n</context>\n\n"
+                        f"Question: {query}\n\n"
+                        "Respond with only the JSON answer object."
+                    )
                 }
             ]
         )

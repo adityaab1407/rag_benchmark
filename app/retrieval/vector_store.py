@@ -9,9 +9,13 @@ import uuid
 class VectorStore:
 
     def __init__(self):
-        self.client = QdrantClient(path=settings.qdrant_path)
+        if settings.qdrant_host:
+            self.client = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+            logger.info("Qdrant connected - server {}:{}", settings.qdrant_host, settings.qdrant_port)
+        else:
+            self.client = QdrantClient(path=settings.qdrant_path)
+            logger.info("Qdrant connected - local path: {}", settings.qdrant_path)
         self.collection_name = settings.collection_name
-        logger.info("Qdrant connected - local path: {}", settings.qdrant_path)
 
     def create_collection(self):
         existing = [c.name for c in self.client.get_collections().collections]

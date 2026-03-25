@@ -5,15 +5,17 @@ from typing import Optional
 class Settings(BaseSettings):
     # LLM - Groq (free tier)
     groq_api_key: Optional[str] = None
-    llm_model: str = "groq/llama-3.3-70b-versatile"
-    llm_model_fast: str = "groq/llama-3.1-8b-instant"
+    llm_model: str = "qwen/qwen3-32b"
+    llm_model_fast: str = "qwen/qwen3-32b"
 
     # Embeddings - runs locally on CPU, no API key needed
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dimension: int = 384
 
-    # Qdrant - local folder, no Docker needed
+    # Qdrant - local folder by default; set qdrant_host to use server mode
     qdrant_path: str = "./qdrant_storage"
+    qdrant_host: Optional[str] = None
+    qdrant_port: int = 6333
     collection_name: str = "rag_benchmark"
 
     # Chunking

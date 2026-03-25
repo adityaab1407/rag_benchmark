@@ -1,8 +1,9 @@
+import os
 import aiosqlite
 from pathlib import Path
 from loguru import logger
 
-DB_PATH = "pipeline_monitor.db"
+DB_PATH = os.environ.get("DB_PATH", "pipeline_monitor.db")
 
 
 async def init_db():

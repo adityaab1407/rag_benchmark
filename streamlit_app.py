@@ -4,10 +4,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import json
 import sqlite3
+import os
 from pathlib import Path
 
 
-API_BASE = "http://localhost:8000/api/v1"
+API_BASE = os.environ.get("API_BASE", "http://localhost:8000/api/v1")
 
 STRATEGY_COLORS = {
     "naive":    "#1D9E75",
@@ -149,7 +150,7 @@ def load_golden():
 
 
 def load_observability_stats():
-    db_path = "pipeline_monitor.db"
+    db_path = os.environ.get("DB_PATH", "pipeline_monitor.db")
     try:
         conn   = sqlite3.connect(db_path)
         tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table'", conn)
@@ -193,7 +194,7 @@ def load_observability_stats():
 
 
 def load_feedback_stats():
-    db_path = "pipeline_monitor.db"
+    db_path = os.environ.get("DB_PATH", "pipeline_monitor.db")
     try:
         conn   = sqlite3.connect(db_path)
         tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table'", conn)

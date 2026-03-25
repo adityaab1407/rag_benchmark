@@ -6,7 +6,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir streamlit plotly pandas requests
 
 COPY streamlit_app.py .
-COPY data/ ./data/
+COPY data/golden_dataset.json ./data/
 
 EXPOSE 8501
 
